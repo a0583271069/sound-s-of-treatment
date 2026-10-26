@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>הקלטת טיפול</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap">
+<style>
+/* Layout: one narrow working column; dictation box on top, newest result first below it. */
+:root {
+  --bg: #f4f6f5;
+  --surface: #ffffff;
+  --fg: #16201c;
+  --muted: #5d6b65;
+  --line: #d8dfdb;
+  --accent: #1f6f5c;
+  --accent-fg: #ffffff;
+  --ok: #1d7a3a;
+  --ok-bg: #e2f3e7;
+  --bad: #b3261e;
+  --bad-bg: #fbe6e4;
+  --fix: #6b3fa0;
+  --fix-bg: #efe7f8;
+  --warn-bg: #fff3d6;
+  --font: "Heebo", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101614; --surface: #19211e; --fg: #e6eeea; --muted: #9aaba3; --line: #2d3a35;
+    --accent: #5cc4a8; --accent-fg: #0b1512;
+    --ok: #6fd48c; --ok-bg: #173424; --bad: #ff8d84; --bad-bg: #3b1d1b;
+    --fix: #c4a2f0; --fix-bg: #2d2140; --warn-bg: #3a3017;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101614; --surface: #19211e; --fg: #e6eeea; --muted: #9aaba3; --line: #2d3a35;
+  --accent: #5cc4a8; --accent-fg: #0b1512;
+  --ok: #6fd48c; --ok-bg: #173424; --bad: #ff8d84; --bad-bg: #3b1d1b;
+  --fix: #c4a2f0; --fix-bg: #2d2140; --warn-bg: #3a3017;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 16px; line-height: 1.5;
+  padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+h1 { font-size: 26px; font-weight: 800; margin: 0; text-wrap: balance; }
+.lead { margin: 4px 0 0; color: var(--muted); }
+.steps { margin: 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 4px; }
+.steps b { font-weight: 700; }
+.note { background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+
+.entrybox { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+textarea {
+  width: 100%; min-height: 180px; resize: vertical; font: inherit; font-size: 22px; line-height: 1.4;
+  color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: 8px; padding: 10px 12px;
+}
+textarea:focus { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button {
+  font: inherit; font-weight: 700; cursor: pointer; border-radius: 8px; border: 2px solid var(--line);
+  background: var(--surface); color: var(--fg); padding: 10px 16px; min-height: 44px;
+}
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button.small { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+.chip { font-weight: 500; font-size: 15px; min-height: 38px; padding: 4px 12px; border-radius: 99px; }
+label.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+.samples { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+
+.ask { display: none; background: var(--bad-bg); border: 2px solid var(--bad); border-radius: 10px; padding: 12px; gap: 10px; flex-direction: column; }
+.ask.on { display: flex; }
+.ask strong { font-size: 20px; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 14px; align-items: center; justify-content: space-between; }
+.list { display: flex; flex-direction: column; gap: 10px; }
+.empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }
+.card.ok { border-inline-start: 6px solid var(--ok); }
+.card.problem { border-inline-start: 6px solid var(--bad); }
+.card.fixed { border-inline-start: 6px solid var(--fix); }
+.card.unknown { border-inline-start: 6px solid var(--muted); }
+.root { font-family: var(--mono); font-weight: 800; font-size: 32px; direction: ltr; min-width: 64px; text-align: center; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill { font-weight: 700; font-size: 14px; border-radius: 99px; padding: 2px 12px; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.problem, .pill.notfixed { background: var(--bad-bg); color: var(--bad); }
+.pill.fixed { background: var(--fix-bg); color: var(--fix); }
+.pill.neutral { background: var(--bg); color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.heard { grid-column: 1 / -1; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.heard q { color: var(--fg); quotes: "„" "“"; }
+.marks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.marks button.on-yes { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.marks button.on-no { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+footer { color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color .2s; } }
+
+/* recorder additions */
+.rec { display: flex; flex-direction: column; gap: 10px; }
+.bigbtn { font-size: 22px; min-height: 64px; padding: 12px 20px; flex: 1 1 200px; }
+button.stop { background: var(--bad); color: #fff; border-color: var(--bad); }
+.status { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.on .dot { background: var(--bad); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .status.on .dot { animation: none; } }
+.interim { color: var(--muted); min-height: 1.5em; font-size: 18px; }
+.small-note { color: var(--muted); font-size: 13px; }
+input[type=text], input[type=password], input[type=url], select {
+  font: inherit; font-size: 16px; width: 100%; min-height: 44px; padding: 8px 10px; color: var(--fg);
+  background: var(--bg); border: 2px solid var(--line); border-radius: 8px;
+}
+input:focus, select:focus { outline: 3px solid var(--accent); outline-offset: 1px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > span { font-size: 14px; color: var(--muted); }
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+details summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+details[open] summary { margin-bottom: 10px; }
+details .fields { display: flex; flex-direction: column; gap: 10px; }
+.result-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.sentmsg { background: var(--ok-bg); color: var(--ok); border-radius: 8px; padding: 10px 12px; font-weight: 700; }
+.errmsg { background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 10px 12px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>הקלטת טיפול</h1>
+    <p class="lead">מקליטים את כל הטיפול ברצף, בסוף בודקים מה הדף הבין ושולחים לגיליון.</p>
+  </header>
+
+  <details id="settings">
+    <summary>הגדרות (פעם אחת בטאבלט)</summary>
+    <div class="fields">
+      <label class="field"><span>כתובת השרת (Apps Script)</span>
+        <input type="url" id="cfgUrl" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></label>
+      <label class="field"><span>סיסמה</span>
+        <input type="password" id="cfgPw" dir="ltr" autocomplete="off"></label>
+      <div class="row"><button class="primary" id="cfgSave" type="button">שמור</button><span id="cfgMsg" class="small-note"></span></div>
+      <p class="small-note">הכתובת והסיסמה נשמרות רק בדפדפן של הטאבלט הזה. הן לא נמצאות בקוד של הדף.</p>
+    </div>
+  </details>
+
+  <section class="entrybox rec" aria-label="הקלטה">
+    <label class="field"><span>מטופל (לא חובה: ת.ז או שם)</span>
+      <input type="text" id="patient" autocomplete="off"></label>
+    <label class="field"><span>שפת ההקלטה</span>
+      <select id="lang">
+        <option value="he-IL">עברית</option>
+        <option value="en-US">English</option>
+        <option value="hu-HU">Magyar</option>
+      </select></label>
+    <div class="row">
+      <button class="primary bigbtn" id="toggle" type="button">התחל להקליט</button>
+    </div>
+    <div class="status" id="status" aria-live="polite"><span class="dot"></span><span id="statusText">לא מקליט</span></div>
+    <div class="interim" id="interim" aria-live="off"></div>
+    <div class="note" id="sysnote" hidden></div>
+    <textarea id="said" dir="auto" lang="he" placeholder="כאן יופיע הטקסט. אפשר גם לתקן אותו ביד לפני השליחה." autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="primary" id="analyze" type="button">סיים ובדוק</button>
+      <button id="clear" type="button">נקה טקסט</button>
+    </div>
+    <p class="small-note">הדף מזהה את המילים בעברית (תקין, לא עובד, אחורה, תוקן וכו'). בשפות אחרות הטקסט נשמר כמו שהוא, אבל הממצאים לא יזוהו.</p>
+  </section>
+
+  <div class="note" id="notice" aria-live="polite" hidden></div>
+
+  <section id="resultBox" hidden>
+    <div class="result-head">
+      <strong id="resultTitle"></strong>
+      <button class="primary" id="send" type="button">שלח לגיליון</button>
+    </div>
+    <p class="small-note">אפשר להסיר ממצא שהוכר לא נכון לפני השליחה. הטקסט המלא נשלח ונשמר בכל מקרה.</p>
+  </section>
+  <div id="msg" aria-live="polite"></div>
+  <section class="list" id="list"></section>
+
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך.</footer>
+</div>
+
+<script>
+var ROOTS = ['C5','C6','C7','C8','T1','L2','L3','L4','L5','S1','S2'];
+var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שתי':2,'שלוש':3,'שלושה':3,'ארבע':4,'ארבעה':4,'חמש':5,'חמישה':5,'שש':6,'שישה':6,'שבע':7,'שבעה':7,'שמונה':8};
+var LET = {'אל':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
+var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
+
+function normalize(t) {
+  t = String(t || '').replace(/[.,;:!?״"׳'()\[\]]/g, ' ').replace(/[-–־]/g, ' ');
+  t = t.replace(/(^|\s)(אל|אין|סיי|סי|אס|טי)(\d)/g, '$1$2 $3');
+  var parts = t.split(/\s+/).filter(Boolean).map(function (w) {
+    return Object.prototype.hasOwnProperty.call(NUM, w) ? String(NUM[w]) : w;
+  });
+  var s = ' ' + parts.join(' ') + ' ';
+  s = s.replace(/\s(אל|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
+  s = s.replace(/\s([LCSTlcst])\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + l.toUpperCase() + d; });
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function has(re, s) { return re.test(' ' + s + ' '); }
+
+function parse(text, pending) {
+  var s = normalize(text);
+  var out = { root: null, known: false, result: null, side: null, dir: null, answer: null, norm: s };
+  var m = /(?:^|\s)([LCST])(\d)(?=\s|$)/i.exec(s);
+  if (m) {
+    out.root = m[1].toUpperCase() + m[2];
+    out.known = ROOTS.indexOf(out.root) >= 0;
+  }
+  if (has(/\sלא (?:תוק[נן]|תוכ[נן]|תיקנ)\S*\s/, s)) out.answer = 'notfixed';
+  else if (has(/\s(?:תוק[נן]|תוכ[נן]|תיקנ)\S*\s/, s)) out.answer = 'fixed';
+  else if (s === 'כן') out.answer = 'fixed';
+  else if (s === 'לא') out.answer = 'notfixed';
+
+  var cleaned = s.replace(/לא (?:תוק[נן]|תוכ[נן]|תיקנ)\S*/g, ' ').replace(/(?:תוק[נן]|תוכ[נן]|תיקנ)\S*/g, ' ');
+  if (has(/\s(לא תקין\S*|לא עובד\S*|לא טוב|חלש\S*|בעיה)\s/, ' ' + cleaned + ' ')) out.result = 'problem';
+  else if (has(/\s(תקין\S*|עובד\S*|חזק\S*|בסדר)\s/, ' ' + cleaned + ' ')) out.result = 'ok';
+
+  s.split(' ').forEach(function (w) {
+    if (/^אחור\S*$/.test(w)) out.dir = 'back';
+    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) out.dir = 'fwd';
+    else if (w === 'ימינה' || w === 'ימין') out.dir = 'bendR';
+    else if (w === 'שמאלה' || w === 'שמאל') out.dir = 'bendL';
+  });
+  if (pending && !out.root && !out.answer && !out.result) {
+    if (has(/\sלא\s/, s)) out.answer = 'notfixed';
+    else if (has(/\s(?:כן|בוצע)\s/, s)) out.answer = 'fixed';
+  }
+  return out;
+}
+
+// Several findings in one dictation: "c2 עובד c3 תקין c6 שמאלה לא עובד ימינה עובד"
+var OKW = /^(?:תקין\S*|עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה)$/;
+var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
+var FIXW = /^(?:תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
+
+function markLast(list, ans, root, unmatched) {
+  for (var i = list.length - 1; i >= 0; i--) {
+    if (list[i].result === 'problem' && !list[i].answer && (!root || list[i].root === root)) { list[i].answer = ans; return; }
+  }
+  unmatched.push({ root: root, answer: ans });
+}
+
+function parseMany(text) {
+  var toks = normalize(text).split(' ').filter(Boolean);
+  var out = [], root = null, dirs = [], sides = [], unmatched = [], dangling = [], lastEmit = -99, allDirs = false;
+  // Four directions only. Several directions + "problem": the last one wins (a slip of the tongue).
+  // Several directions + "ok": every direction named is ok.
+  function emit(result, at) {
+    if (root) {
+      var ds = dirs.filter(function (d, i) { return dirs.indexOf(d) === i; });
+      if (result === 'problem' && ds.length > 1 && !allDirs) ds = [ds[ds.length - 1]];
+      if (!ds.length) ds = [null];
+      ds.forEach(function (d) {
+        out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: result, side: null, dir: d, answer: null });
+      });
+      lastEmit = at;
+    }
+    dirs = []; sides = []; allDirs = false;
+  }
+  function flush() {
+    if (root && (dirs.length || sides.length)) dangling.push({ root: root, dirs: dirs.slice(), sides: sides.slice() });
+    dirs = []; sides = []; allDirs = false;
+  }
+  for (var i = 0; i < toks.length; i++) {
+    var w = toks[i], nx = toks[i + 1] || '';
+    var rm = /^([LCST])(\d)$/i.exec(w);
+    if (rm) { flush(); root = rm[1].toUpperCase() + rm[2]; continue; }
+    if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
+    if (FIXW.test(w)) { markLast(out, 'fixed', root, unmatched); continue; }
+    if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i); i++; continue; }
+    if (BADW.test(w)) { emit('problem', i); continue; }
+    if (OKW.test(w)) { emit('ok', i); continue; }
+    if (/^ה?כיוונים$/.test(w)) {
+      var prev = out[out.length - 1];
+      if (prev && prev.root === root && prev.dir === null && i - lastEmit <= 3) {
+        var res = prev.result, sd = prev.side;
+        out.pop();
+        ['fwd', 'back', 'bendR', 'bendL'].forEach(function (d) {
+          out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: res, side: sd, dir: d, answer: null });
+        });
+      } else { dirs = ['fwd', 'back', 'bendR', 'bendL']; allDirs = true; }
+      continue;
+    }
+    if (/^אחור\S*$/.test(w)) dirs.push('back');
+    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) dirs.push('fwd');
+    else if (w === 'ימינה' || w === 'ימין') dirs.push('bendR');
+    else if (w === 'שמאלה' || w === 'שמאל') dirs.push('bendL');
+  }
+  flush();
+  out.dangling = dangling;
+  out.unmatched = unmatched;
+  return out;
+}
+
+
+var DRAFT = 'clinic-draft-v1', CFG = 'clinic-settings-v1', PAT = 'clinic-patient-v1';
+var $ = function (id) { return document.getElementById(id); };
+function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+var said = $('said');
+
+// ---- settings --------------------------------------------------------------
+(function () {
+  var c = {}; try { c = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
+  $('cfgUrl').value = c.url || ''; $('cfgPw').value = c.pw || '';
+  if (!c.url || !c.pw) $('settings').open = true;
+  $('cfgSave').onclick = function () {
+    var url = $('cfgUrl').value.trim();
+    if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
+      $('cfgMsg').textContent = 'הכתובת צריכה להתחיל ב-https://script.google.com/macros/s/ ולהסתיים ב-/exec'; return;
+    }
+    lsSet(CFG, JSON.stringify({ url: url, pw: $('cfgPw').value }));
+    $('cfgMsg').textContent = 'נשמר'; $('settings').open = false;
+  };
+  $('patient').value = lsGet(PAT) || '';
+  $('patient').addEventListener('input', function () { lsSet(PAT, $('patient').value); });
+})();
+
+// ---- draft -----------------------------------------------------------------
+said.value = lsGet(DRAFT) || '';
+said.addEventListener('input', function () { lsSet(DRAFT, said.value); });
+$('clear').onclick = function () {
+  var b = $('clear');
+  if (!said.value) return;
+  if (b.dataset.sure === '1') { said.value = ''; lsDel(DRAFT); b.textContent = 'נקה טקסט'; b.dataset.sure = ''; }
+  else { b.dataset.sure = '1'; b.textContent = 'לחץ שוב למחיקה'; setTimeout(function () { b.dataset.sure = ''; b.textContent = 'נקה טקסט'; }, 3000); }
+};
+
+// ---- recording -------------------------------------------------------------
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+var rec = null, wantOn = false, lastFinal = '', lastFinalAt = 0, restarts = 0, wake = null;
+
+function note(txt) { var n = $('sysnote'); n.hidden = !txt; n.textContent = txt || ''; }
+function setStatus(on, txt) { $('status').classList.toggle('on', on); $('statusText').textContent = txt; }
+
+function addFinal(t) {
+  t = String(t || '').trim();
+  if (!t) return;
+  var now = Date.now();
+  if (t === lastFinal && now - lastFinalAt < 1500) return; // Android Chrome sometimes repeats a final result
+  lastFinal = t; lastFinalAt = now;
+  var cur = said.value.replace(/\s+$/, '');
+  said.value = (cur ? cur + ' ' : '') + t;
+  lsSet(DRAFT, said.value);
+  said.scrollTop = said.scrollHeight;
+}
+
+function buildRec() {
+  rec = new SR();
+  rec.lang = $('lang').value;
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+  rec.onstart = function () { setStatus(true, 'מקליט' + (restarts ? ' (חידוש ' + restarts + ')' : '')); };
+  rec.onresult = function (ev) {
+    var interim = '';
+    for (var i = ev.resultIndex; i < ev.results.length; i++) {
+      var r = ev.results[i];
+      if (r.isFinal) addFinal(r[0].transcript); else interim += r[0].transcript + ' ';
+    }
+    $('interim').textContent = interim;
+  };
+  rec.onerror = function (ev) {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      wantOn = false; note('אין הרשאת מיקרופון. אפשר אותה בהגדרות האתר ב-Chrome ונסה שוב.');
+    } else if (ev.error === 'network') {
+      note('אין חיבור לשירות הזיהוי (רשת). בדוק אינטרנט. הדף ממשיך לנסות.');
+    } else if (ev.error === 'audio-capture') {
+      wantOn = false; note('המיקרופון לא זמין. בדוק שאפליקציה אחרת לא משתמשת בו.');
+    }
+    // no-speech / aborted: onend restarts
+  };
+  rec.onend = function () {
+    $('interim').textContent = '';
+    if (wantOn) {
+      setStatus(true, 'מחדש האזנה…');
+      setTimeout(function () {
+        if (!wantOn) return;
+        restarts++;
+        try { rec.start(); } catch (e) { try { buildRec(); rec.start(); } catch (e2) { setStatus(false, 'ההקלטה נעצרה'); wantOn = false; syncBtn(); } }
+      }, 350);
+    } else { setStatus(false, 'לא מקליט'); }
+    syncBtn();
+  };
+}
+
+function syncBtn() {
+  var b = $('toggle');
+  b.textContent = wantOn ? 'עצור הקלטה' : 'התחל להקליט';
+  b.classList.toggle('stop', wantOn); b.classList.toggle('primary', !wantOn);
+  $('lang').disabled = wantOn;
+}
+
+function getWake() {
+  if (!wantOn || !('wakeLock' in navigator)) { if (wantOn) note('הדפדפן לא תומך בנעילת מסך. הגדל את זמן כיבוי המסך בהגדרות הטאבלט.'); return; }
+  navigator.wakeLock.request('screen').then(function (w) {
+    wake = w;
+    w.addEventListener('release', function () { wake = null; });
+  }).catch(function () { note('לא הצלחתי להשאיר את המסך דלוק. הגדל את זמן כיבוי המסך בהגדרות הטאבלט.'); });
+}
+function releaseWake() { try { if (wake) wake.release(); } catch (e) {} wake = null; }
+
+$('toggle').onclick = function () {
+  if (wantOn) { wantOn = false; try { rec.stop(); } catch (e) {} releaseWake(); setStatus(false, 'לא מקליט'); syncBtn(); return; }
+  if (!SR) { note('הדפדפן הזה לא תומך בהקלטה. פתח את הדף ב-Chrome.'); return; }
+  note('');
+  wantOn = true; restarts = 0; lastFinal = '';
+  buildRec();
+  try { rec.start(); } catch (e) { note('לא הצלחתי להתחיל. נסה שוב.'); wantOn = false; }
+  getWake(); syncBtn();
+};
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && wantOn) {
+    if (!wake) getWake();
+    try { rec.start(); } catch (e) { /* already running */ }
+  }
+});
+
+// ---- analyze ---------------------------------------------------------------
+var found = [];
+function analyze() {
+  $('msg').textContent = '';
+  var text = said.value.trim();
+  if (!text) { $('resultBox').hidden = true; $('list').textContent = ''; note('אין טקסט לבדיקה.'); return; }
+  if (wantOn) $('toggle').click();
+  note('');
+  var all = parseMany(text);
+  found = all.filter(function (f) { return f.result; });
+  var dg = all.dangling || [], un = all.unmatched || [];
+  var parts = [];
+  if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
+    return d.root + ' ' + d.dirs.map(function (x) { return DIRS[x]; }).join(' ');
+  }).join(' · '));
+  if (un.length) parts.push('תשובת "תוקן / לא תוקן" שלא נמצאה לה בעיה מתאימה: ' + un.length);
+  $('notice').hidden = !parts.length; $('notice').textContent = parts.join('. ');
+  renderFound();
+}
+
+function renderFound() {
+  var list = $('list'); list.textContent = '';
+  $('resultBox').hidden = false;
+  $('resultTitle').textContent = found.length ? 'זוהו ' + found.length + ' ממצאים' : 'לא זוהו ממצאים. הטקסט עדיין יישלח ויישמר.';
+  found.forEach(function (f) {
+    var kind = f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
+    var c = el('div', 'card ' + kind);
+    c.appendChild(el('div', 'root', f.root));
+    var pills = el('div', 'pills');
+    pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : 'problem'), f.result === 'ok' ? 'תקין' : 'בעיה'));
+    if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
+    if (f.answer === 'notfixed') pills.appendChild(el('span', 'pill notfixed', 'לא תוקן'));
+    if (f.dir) pills.appendChild(el('span', 'pill neutral', DIRS[f.dir]));
+    if (!f.known) pills.appendChild(el('span', 'pill neutral', 'שורש לא בטבלה'));
+    c.appendChild(pills);
+    var marks = el('div', 'marks');
+    var del = el('button', 'small', 'הסר'); del.type = 'button';
+    del.onclick = function () { found = found.filter(function (x) { return x !== f; }); renderFound(); };
+    marks.appendChild(del); c.appendChild(marks);
+    list.appendChild(c);
+  });
+}
+$('analyze').onclick = analyze;
+
+// ---- send ------------------------------------------------------------------
+function newId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+var pendingId = null;
+
+$('send').onclick = function () {
+  var c = {}; try { c = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
+  var msg = $('msg'); msg.className = ''; msg.textContent = '';
+  if (!c.url || !c.pw) { $('settings').open = true; msg.className = 'errmsg'; msg.textContent = 'חסרות כתובת וסיסמה בהגדרות.'; return; }
+  var text = said.value.trim();
+  if (!text) return;
+  if (!pendingId) pendingId = newId(); // same id on retry, so the server can ignore a duplicate
+  var body = {
+    pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text,
+    findings: found.map(function (f, i) {
+      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '' };
+    })
+  };
+  var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';
+  fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok) {
+        msg.className = 'sentmsg';
+        msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.';
+        said.value = ''; lsDel(DRAFT); pendingId = null; found = [];
+        $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true;
+      } else {
+        msg.className = 'errmsg';
+        msg.textContent = 'השרת סירב: ' + ((j && j.error) || 'שגיאה לא ידועה') + '. הטקסט נשמר בטאבלט.';
+      }
+    })
+    .catch(function () {
+      msg.className = 'errmsg';
+      msg.textContent = 'השליחה נכשלה (אין חיבור או כתובת שגויה). הטקסט נשמר בטאבלט, אפשר ללחוץ שוב.';
+    })
+    .then(function () { btn.disabled = false; btn.textContent = 'שלח לגיליון'; });
+};
+</script>
+</body>
+</html>
