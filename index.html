@@ -189,17 +189,20 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
 <script>
 var ROOTS = ['C5','C6','C7','C8','T1','L2','L3','L4','L5','S1','S2'];
 var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שתי':2,'שלוש':3,'שלושה':3,'ארבע':4,'ארבעה':4,'חמש':5,'חמישה':5,'שש':6,'שישה':6,'שבע':7,'שבעה':7,'שמונה':8};
-var LET = {'אל':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
+var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
+// whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
+var ROOTWORD = {'68':'C8','ששמונה':'C8'};
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
 
 function normalize(t) {
   t = String(t || '').replace(/[.,;:!?״"׳'()\[\]]/g, ' ').replace(/[-–־]/g, ' ');
-  t = t.replace(/(^|\s)(אל|אין|סיי|סי|אס|טי)(\d)/g, '$1$2 $3');
+  t = t.replace(/(^|\s)(אלה|אל|יש|אין|סיי|סי|אס|טי)(\d)/g, '$1$2 $3');
   var parts = t.split(/\s+/).filter(Boolean).map(function (w) {
+    if (Object.prototype.hasOwnProperty.call(ROOTWORD, w)) return ROOTWORD[w];
     return Object.prototype.hasOwnProperty.call(NUM, w) ? String(NUM[w]) : w;
   });
   var s = ' ' + parts.join(' ') + ' ';
-  s = s.replace(/\s(אל|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
+  s = s.replace(/\s(אלה|אל|יש|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
   s = s.replace(/\s([LCSTlcst])\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + l.toUpperCase() + d; });
   return s.replace(/\s+/g, ' ').trim();
 }
