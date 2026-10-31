@@ -162,6 +162,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
     <div class="status" id="status" aria-live="polite"><span class="dot"></span><span id="statusText">לא מקליט</span></div>
     <div class="interim" id="interim" aria-live="off"></div>
     <div class="note" id="sysnote" hidden></div>
+    <div class="small-note" id="autosave" aria-live="off"></div>
     <textarea id="said" dir="auto" lang="he" placeholder="כאן יופיע הטקסט. אפשר גם לתקן אותו ביד לפני השליחה." autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
     <div class="row">
       <button class="primary" id="analyze" type="button">סיים ובדוק</button>
@@ -332,27 +333,68 @@ said.addEventListener('input', function () { lsSet(DRAFT, said.value); });
 $('clear').onclick = function () {
   var b = $('clear');
   if (!said.value) return;
-  if (b.dataset.sure === '1') { said.value = ''; lsDel(DRAFT); b.textContent = 'נקה טקסט'; b.dataset.sure = ''; }
+  if (b.dataset.sure === '1') { said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; lastPiece = ''; setAuto(''); b.textContent = 'נקה טקסט'; b.dataset.sure = ''; }
   else { b.dataset.sure = '1'; b.textContent = 'לחץ שוב למחיקה'; setTimeout(function () { b.dataset.sure = ''; b.textContent = 'נקה טקסט'; }, 3000); }
 };
 
 // ---- recording -------------------------------------------------------------
 var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-var rec = null, wantOn = false, lastFinal = '', lastFinalAt = 0, restarts = 0, wake = null;
+var rec = null, wantOn = false, restarts = 0, wake = null;
 
 function note(txt) { var n = $('sysnote'); n.hidden = !txt; n.textContent = txt || ''; }
 function setStatus(on, txt) { $('status').classList.toggle('on', on); $('statusText').textContent = txt; }
 
+var TLK = 'clinic-timeline-v1';
+var tl = [], recStart = 0, lastPiece = '', lastPieceAt = 0, pendingId = null, autoTimer = null, lastSaved = '', saving = false;
+(function () {
+  try { var o = JSON.parse(lsGet(TLK) || 'null'); if (o && said.value) { tl = o.tl || []; recStart = o.start || 0; pendingId = o.sid || null; } } catch (e) {}
+})();
+function saveTl() { lsSet(TLK, JSON.stringify({ tl: tl, start: recStart, sid: pendingId })); }
+function wordsOf(x) { return String(x).split(/\s+/).filter(Boolean); }
+// Android Chrome keeps re-sending the growing sentence as a new "final" result.
+// If the new text is the same sentence extended/corrected (and arrives within a few seconds), replace instead of append.
+function sameSeg(a, b) {
+  var A = wordsOf(a), B = wordsOf(b);
+  var sh = A.length <= B.length ? A : B, lg = A.length <= B.length ? B : A;
+  if (!sh.length) return false;
+  var pool = lg.slice(), hit = 0;
+  sh.forEach(function (w) { var i = pool.indexOf(w); if (i >= 0) { hit++; pool.splice(i, 1); } });
+  return hit / sh.length >= 0.6;
+}
 function addFinal(t) {
   t = String(t || '').trim();
   if (!t) return;
   var now = Date.now();
-  if (t === lastFinal && now - lastFinalAt < 1500) return; // Android Chrome sometimes repeats a final result
-  lastFinal = t; lastFinalAt = now;
+  if (!recStart) recStart = now;
   var cur = said.value.replace(/\s+$/, '');
+  if (lastPiece && now - lastPieceAt < 3500 && cur.slice(-lastPiece.length) === lastPiece && sameSeg(lastPiece, t)) {
+    cur = cur.slice(0, cur.length - lastPiece.length).replace(/\s+$/, '');
+    if (tl.length && tl[tl.length - 1][1] === lastPiece) tl[tl.length - 1][1] = t;
+  } else {
+    tl.push([Math.round((now - recStart) / 1000), t]);
+  }
+  lastPiece = t; lastPieceAt = now;
   said.value = (cur ? cur + ' ' : '') + t;
-  lsSet(DRAFT, said.value);
+  lsSet(DRAFT, said.value); saveTl();
   said.scrollTop = said.scrollHeight;
+}
+
+function setAuto(txt) { var n = $('autosave'); if (n) n.textContent = txt || ''; }
+function autosave() {
+  var c = {}; try { c = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
+  var text = said.value.trim();
+  if (!c.url || !c.pw || !text || saving || text === lastSaved) return;
+  if (!pendingId) { pendingId = newId(); saveTl(); }
+  saving = true;
+  var body = { pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text, findings: [], segments: tl, partial: true };
+  fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok) { lastSaved = text; var d = new Date(); setAuto('נשמר אוטומטית ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2)); }
+      else setAuto('השמירה האוטומטית נכשלה');
+    })
+    .catch(function () { setAuto('אין חיבור, השמירה האוטומטית תנסה שוב'); })
+    .then(function () { saving = false; });
 }
 
 function buildRec() {
@@ -411,10 +453,12 @@ function getWake() {
 function releaseWake() { try { if (wake) wake.release(); } catch (e) {} wake = null; }
 
 $('toggle').onclick = function () {
-  if (wantOn) { wantOn = false; try { rec.stop(); } catch (e) {} releaseWake(); setStatus(false, 'לא מקליט'); syncBtn(); return; }
+  if (wantOn) { wantOn = false; try { rec.stop(); } catch (e) {} releaseWake(); setStatus(false, 'לא מקליט'); syncBtn(); if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } setTimeout(autosave, 800); return; }
   if (!SR) { note('הדפדפן הזה לא תומך בהקלטה. פתח את הדף ב-Chrome.'); return; }
   note('');
-  wantOn = true; restarts = 0; lastFinal = '';
+  wantOn = true; restarts = 0; lastPiece = '';
+  if (!pendingId) { pendingId = newId(); } saveTl();
+  if (autoTimer) clearInterval(autoTimer); autoTimer = setInterval(autosave, 120000);
   buildRec();
   try { rec.start(); } catch (e) { note('לא הצלחתי להתחיל. נסה שוב.'); wantOn = false; }
   getWake(); syncBtn();
@@ -472,7 +516,6 @@ $('analyze').onclick = analyze;
 
 // ---- send ------------------------------------------------------------------
 function newId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-var pendingId = null;
 
 $('send').onclick = function () {
   var c = {}; try { c = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
@@ -483,6 +526,7 @@ $('send').onclick = function () {
   if (!pendingId) pendingId = newId(); // same id on retry, so the server can ignore a duplicate
   var body = {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text,
+    segments: tl, partial: false,
     findings: found.map(function (f, i) {
       return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '' };
     })
@@ -494,7 +538,7 @@ $('send').onclick = function () {
       if (j && j.ok) {
         msg.className = 'sentmsg';
         msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.';
-        said.value = ''; lsDel(DRAFT); pendingId = null; found = [];
+        said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; lastPiece = ''; setAuto(''); found = [];
         $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true;
       } else {
         msg.className = 'errmsg';
