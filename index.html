@@ -192,6 +192,10 @@ var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שת�
 var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
 // whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
 var ROOTWORD = {'68':'C8','ששמונה':'C8'};
+// muscles the dictation knows by name (heard variants -> one canonical name). Only piriformis so far.
+var MUSCLES = {'פיריפורמיס':'פיריפורמיס','פרפורמיס':'פיריפורמיס','רפורמיס':'פיריפורמיס','פיריפורמס':'פיריפורמיס','פירפורמס':'פיריפורמיס','פירפורמיס':'פיריפורמיס'};
+var MUSCLE_NAMES = ['פיריפורמיס'];
+function isMuscle(r) { return MUSCLE_NAMES.indexOf(r) >= 0; }
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
 
 function normalize(t) {
@@ -202,6 +206,7 @@ function normalize(t) {
     return Object.prototype.hasOwnProperty.call(NUM, w) ? String(NUM[w]) : w;
   });
   var s = ' ' + parts.join(' ') + ' ';
+  s = s.replace(/\sפירי פורמ(?:יס|ס)(?=\s)/g, ' פיריפורמיס');
   s = s.replace(/\s(אלה|אל|יש|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
   s = s.replace(/\s([LCSTlcst])\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + l.toUpperCase() + d; });
   return s.replace(/\s+/g, ' ').trim();
@@ -246,7 +251,7 @@ var FIXW = /^(?:תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
 
 function markLast(list, ans, root, unmatched) {
   for (var i = list.length - 1; i >= 0; i--) {
-    if (list[i].result === 'problem' && !list[i].answer && (!root || list[i].root === root)) { list[i].answer = ans; return; }
+    if (list[i].result === 'problem' && !list[i].answer && (!root || (list[i].muscle || list[i].root) === root)) { list[i].answer = ans; return; }
   }
   unmatched.push({ root: root, answer: ans });
 }
@@ -267,7 +272,7 @@ function parseMany(text) {
       if (ph.length > 12) ph = ph.slice(ph.length - 12);
       var phrase = ph.join(' ');
       ds.forEach(function (d) {
-        out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: result, side: null, dir: d, answer: null, phrase: phrase });
+        out.push({ root: isMuscle(root) ? '' : root, muscle: isMuscle(root) ? root : '', known: ROOTS.indexOf(root) >= 0 || isMuscle(root), result: result, side: null, dir: d, answer: null, phrase: phrase });
       });
       lastEmit = at; lastEnd = to;
     }
@@ -281,6 +286,7 @@ function parseMany(text) {
     var w = toks[i], nx = toks[i + 1] || '';
     var rm = /^([LCST])(\d)$/i.exec(w);
     if (rm) { flush(); root = rm[1].toUpperCase() + rm[2]; rootAt = i; continue; }
+    if (Object.prototype.hasOwnProperty.call(MUSCLES, w)) { flush(); root = MUSCLES[w]; rootAt = i; continue; }
     if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
     if (FIXW.test(w)) { markLast(out, 'fixed', root, unmatched); continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
@@ -288,11 +294,11 @@ function parseMany(text) {
     if (OKW.test(w)) { emit('ok', i); continue; }
     if (/^ה?כיוונים$/.test(w)) {
       var prev = out[out.length - 1];
-      if (prev && prev.root === root && prev.dir === null && i - lastEmit <= 3) {
+      if (prev && (prev.muscle || prev.root) === root && prev.dir === null && i - lastEmit <= 3) {
         var res = prev.result, sd = prev.side;
         out.pop();
         ['fwd', 'back', 'bendR', 'bendL'].forEach(function (d) {
-          out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: res, side: sd, dir: d, answer: null, phrase: ((prev.phrase || '') + ' ' + w).trim() });
+          out.push({ root: isMuscle(root) ? '' : root, muscle: isMuscle(root) ? root : '', known: ROOTS.indexOf(root) >= 0 || isMuscle(root), result: res, side: sd, dir: d, answer: null, phrase: ((prev.phrase || '') + ' ' + w).trim() });
         });
       } else { dirs = ['fwd', 'back', 'bendR', 'bendL']; allDirs = true; }
       continue;
@@ -505,7 +511,7 @@ function renderFound() {
   found.forEach(function (f) {
     var kind = f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
     var c = el('div', 'card ' + kind);
-    c.appendChild(el('div', 'root', f.root));
+    c.appendChild(el('div', 'root', f.muscle || f.root));
     var pills = el('div', 'pills');
     pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : 'problem'), f.result === 'ok' ? 'תקין' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
@@ -537,7 +543,7 @@ $('send').onclick = function () {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
-      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '' };
+      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '' };
     })
   };
   var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';

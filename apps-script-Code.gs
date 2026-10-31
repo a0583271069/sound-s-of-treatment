@@ -8,7 +8,7 @@ var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
 var T_HEAD = ['received_at', 'updated_at', 'session_id', 'patient', 'lang', 'findings_count',
   'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2'];
-var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase'];
+var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle'];
 var BACKUP_FOLDER = 'גיבויי קליניקה';
 var BACKUP_KEEP = 8;
 
@@ -90,7 +90,7 @@ function doPost(e) {
       }
       if (fs.length) {
         var rows = fs.map(function (x) {
-          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || '')];
+          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || ''), String(x.muscle || '')];
         });
         var fr = f.getLastRow() + 1;
         f.getRange(fr, 1, rows.length, F_HEAD.length).setNumberFormat('@');
