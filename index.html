@@ -251,17 +251,22 @@ function markLast(list, ans, root, unmatched) {
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
   var out = [], root = null, dirs = [], sides = [], unmatched = [], dangling = [], lastEmit = -99, allDirs = false;
+  var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
   // Four directions only. Several directions + "problem": the last one wins (a slip of the tongue).
   // Several directions + "ok": every direction named is ok.
-  function emit(result, at) {
+  function emit(result, at, end) {
     if (root) {
       var ds = dirs.filter(function (d, i) { return dirs.indexOf(d) === i; });
       if (result === 'problem' && ds.length > 1 && !allDirs) ds = [ds[ds.length - 1]];
       if (!ds.length) ds = [null];
+      var to = end == null ? at : end;
+      var ph = toks.slice(Math.max(rootAt, lastEnd + 1), to + 1);
+      if (ph.length > 12) ph = ph.slice(ph.length - 12);
+      var phrase = ph.join(' ');
       ds.forEach(function (d) {
-        out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: result, side: null, dir: d, answer: null });
+        out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: result, side: null, dir: d, answer: null, phrase: phrase });
       });
-      lastEmit = at;
+      lastEmit = at; lastEnd = to;
     }
     dirs = []; sides = []; allDirs = false;
   }
@@ -272,10 +277,10 @@ function parseMany(text) {
   for (var i = 0; i < toks.length; i++) {
     var w = toks[i], nx = toks[i + 1] || '';
     var rm = /^([LCST])(\d)$/i.exec(w);
-    if (rm) { flush(); root = rm[1].toUpperCase() + rm[2]; continue; }
+    if (rm) { flush(); root = rm[1].toUpperCase() + rm[2]; rootAt = i; continue; }
     if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
     if (FIXW.test(w)) { markLast(out, 'fixed', root, unmatched); continue; }
-    if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i); i++; continue; }
+    if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
     if (BADW.test(w)) { emit('problem', i); continue; }
     if (OKW.test(w)) { emit('ok', i); continue; }
     if (/^ה?כיוונים$/.test(w)) {
@@ -284,7 +289,7 @@ function parseMany(text) {
         var res = prev.result, sd = prev.side;
         out.pop();
         ['fwd', 'back', 'bendR', 'bendL'].forEach(function (d) {
-          out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: res, side: sd, dir: d, answer: null });
+          out.push({ root: root, known: ROOTS.indexOf(root) >= 0, result: res, side: sd, dir: d, answer: null, phrase: ((prev.phrase || '') + ' ' + w).trim() });
         });
       } else { dirs = ['fwd', 'back', 'bendR', 'bendL']; allDirs = true; }
       continue;
@@ -505,6 +510,7 @@ function renderFound() {
     if (f.dir) pills.appendChild(el('span', 'pill neutral', DIRS[f.dir]));
     if (!f.known) pills.appendChild(el('span', 'pill neutral', 'שורש לא בטבלה'));
     c.appendChild(pills);
+    if (f.phrase) { var ph = el('div', null, f.phrase); ph.style.cssText = 'grid-column:1/-1;font-size:13px;color:var(--muted)'; c.appendChild(ph); }
     var marks = el('div', 'marks');
     var del = el('button', 'small', 'הסר'); del.type = 'button';
     del.onclick = function () { found = found.filter(function (x) { return x !== f; }); renderFound(); };
@@ -528,7 +534,7 @@ $('send').onclick = function () {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
-      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '' };
+      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '' };
     })
   };
   var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';

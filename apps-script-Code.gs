@@ -8,7 +8,7 @@ var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
 var T_HEAD = ['received_at', 'updated_at', 'session_id', 'patient', 'lang', 'findings_count',
   'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2'];
-var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed'];
+var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase'];
 var BACKUP_FOLDER = 'גיבויי קליניקה';
 var BACKUP_KEEP = 8;
 
@@ -23,6 +23,9 @@ function sheet_(name, head) {
     sh = ss.insertSheet(name);
     sh.getRange(1, 1, 1, head.length).setValues([head]);
     sh.setFrozenRows(1);
+  } else if (String(sh.getRange(1, head.length).getValue()) !== head[head.length - 1]) {
+    // an older version of the sheet: add the missing header cell(s)
+    sh.getRange(1, 1, 1, head.length).setValues([head]);
   }
   return sh;
 }
@@ -87,7 +90,7 @@ function doPost(e) {
       }
       if (fs.length) {
         var rows = fs.map(function (x) {
-          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || '')];
+          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || '')];
         });
         var fr = f.getLastRow() + 1;
         f.getRange(fr, 1, rows.length, F_HEAD.length).setNumberFormat('@');
