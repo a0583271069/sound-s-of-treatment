@@ -367,13 +367,14 @@ function saveTl() { lsSet(TLK, JSON.stringify({ tl: tl, start: recStart, sid: pe
 function wordsOf(x) { return String(x).split(/\s+/).filter(Boolean); }
 // Android Chrome keeps re-sending the growing sentence as a new "final" result.
 // If the new text is the same sentence extended/corrected (and arrives within a few seconds), replace instead of append.
+// Only a sentence that GREW (same beginning, not shorter) replaces the old one. A shorter or different
+// piece is always appended, so nothing already written can be deleted by mistake.
 function sameSeg(a, b) {
   var A = wordsOf(a), B = wordsOf(b);
-  var sh = A.length <= B.length ? A : B, lg = A.length <= B.length ? B : A;
-  if (!sh.length) return false;
-  var pool = lg.slice(), hit = 0;
-  sh.forEach(function (w) { var i = pool.indexOf(w); if (i >= 0) { hit++; pool.splice(i, 1); } });
-  return hit / sh.length >= 0.6;
+  if (!A.length || B.length < A.length) return false;
+  var k = Math.max(1, Math.ceil(A.length * 0.6));
+  for (var i = 0; i < k; i++) if (A[i] !== B[i]) return false;
+  return true;
 }
 function addFinal(t) {
   t = String(t || '').trim();
