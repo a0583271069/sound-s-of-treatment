@@ -7,8 +7,8 @@
 var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
 var T_HEAD = ['received_at', 'updated_at', 'session_id', 'patient', 'lang', 'findings_count',
-  'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2'];
-var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle'];
+  'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2', 'treatment_id'];
+var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle', 'treatment_id'];
 var BACKUP_FOLDER = 'גיבויי קליניקה';
 var BACKUP_KEEP = 8;
 
@@ -56,6 +56,7 @@ function doPost(e) {
 
     var now = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss');
     var patient = String(d.patient || '');
+    var tid = String(d.treatment_id || '');
     var fs = d.findings || [];
     var partial = d.partial === true;
     var text = String(d.text || '');
@@ -75,9 +76,10 @@ function doPost(e) {
       t.getRange(row, 2, 1, 1).setNumberFormat('@').setValue(now);
       t.getRange(row, 4, 1, 3).setNumberFormat('@').setValues([[patient, String(d.lang || ''), nFind]]);
       t.getRange(row, 7, 1, 6).setNumberFormat('@').setValues([rp.concat(tp)]);
+      if (tid) t.getRange(row, 13, 1, 1).setNumberFormat('@').setValue(tid);
     } else {
       row = last + 1;
-      var vals = [now, now, session, patient, String(d.lang || ''), nFind].concat(rp, tp);
+      var vals = [now, now, session, patient, String(d.lang || ''), nFind].concat(rp, tp, [tid]);
       t.getRange(row, 1, 1, vals.length).setNumberFormat('@').setValues([vals]);
     }
 
@@ -90,7 +92,7 @@ function doPost(e) {
       }
       if (fs.length) {
         var rows = fs.map(function (x) {
-          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || ''), String(x.muscle || '')];
+          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || ''), String(x.muscle || ''), tid];
         });
         var fr = f.getLastRow() + 1;
         f.getRange(fr, 1, rows.length, F_HEAD.length).setNumberFormat('@');

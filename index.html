@@ -150,6 +150,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="entrybox rec" aria-label="הקלטה">
     <label class="field"><span>מטופל (לא חובה: ת.ז או שם)</span>
       <input type="text" id="patient" autocomplete="off"></label>
+    <p class="small-note" id="linkNote" hidden></p>
     <label class="field"><span>שפת ההקלטה</span>
       <select id="lang">
         <option value="he-IL">עברית</option>
@@ -315,6 +316,7 @@ function parseMany(text) {
 }
 
 
+var TREATMENT = '';
 var DRAFT = 'clinic-draft-v1', CFG = 'clinic-settings-v1', PAT = 'clinic-patient-v1';
 var $ = function (id) { return document.getElementById(id); };
 function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
@@ -339,6 +341,13 @@ var said = $('said');
   };
   $('patient').value = lsGet(PAT) || '';
   $('patient').addEventListener('input', function () { lsSet(PAT, $('patient').value); });
+  // opened from the app button: ?patient=<id>&t=<treatment id>
+  try {
+    var q = new URLSearchParams(location.search), qp = (q.get('patient') || '').trim(), qt = (q.get('t') || '').trim();
+    if (qp) { $('patient').value = qp; lsSet(PAT, qp); }
+    TREATMENT = qt;
+    if (qt) { $('linkNote').hidden = false; $('linkNote').textContent = 'מקושר לטיפול ' + qt; }
+  } catch (e) {}
 })();
 
 // ---- draft -----------------------------------------------------------------
@@ -401,7 +410,7 @@ function autosave() {
   if (!c.url || !c.pw || !text || saving || text === lastSaved) return;
   if (!pendingId) { pendingId = newId(); saveTl(); }
   saving = true;
-  var body = { pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text, findings: [], segments: tl, partial: true };
+  var body = { pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text, findings: [], segments: tl, partial: true };
   fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
     .then(function (j) {
@@ -541,7 +550,7 @@ $('send').onclick = function () {
   if (!text) return;
   if (!pendingId) pendingId = newId(); // same id on retry, so the server can ignore a duplicate
   var body = {
-    pw: c.pw, session: pendingId, patient: $('patient').value.trim(), lang: $('lang').value, text: text,
+    pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
       return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '' };
