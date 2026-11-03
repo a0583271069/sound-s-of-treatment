@@ -101,6 +101,7 @@ function doPost(e) {
     }
     var ap = { done: 0, waiting: 0 };
     if (!partial && tid) {
+      try { generateRows_(); } catch (e5) {}
       try { ap = applyPending_(tid); } catch (e3) { ap = { done: 0, waiting: -1 }; }
       try { ensureApplyTrigger_(); } catch (e4) {}
     }
@@ -113,10 +114,9 @@ function doPost(e) {
 }
 
 // ---- write the dictated findings into the rows of the treatment -----------------
-// The app creates one NEURO_RESULTS row per nerve test and one MUSCLE_RESULTS row per muscle when a
-// treatment is saved. A finding is written into those rows only after ALL of them have reached the Sheet
-// (the tablet uploads them one by one). Until then the finding stays in FINDINGS with an empty "applied"
-// cell, and applyPending (every 5 minutes) tries again.
+// Every treatment has one NEURO_RESULTS row per nerve test and one MUSCLE_RESULTS row per muscle (created by
+// generateRows_ below). A finding is written into those rows only after ALL of them exist in the Sheet.
+// Until then the finding stays in FINDINGS with an empty "applied" cell, and tick (every minute) tries again.
 var RES_OK = 'עובד', RES_BAD = 'לא עובד', FIX_YES = 'תוקן', FIX_NO = 'לא תוקן';
 
 function stamp_() { return Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss'); }
@@ -223,7 +223,8 @@ function applyPending_(onlyTid) {
       var res = result === 'ok' ? RES_OK : RES_BAD;
       var fix = res === RES_BAD ? (fixed === 'fixed' ? FIX_YES : fixed === 'notfixed' ? FIX_NO : '') : '';
       var how = '';
-      if (isM && fix === FIX_YES) {
+      // reasons (R1..R7) go with a fixed muscle that did not work; "שיחררתי" (R9) goes with a muscle that works too strongly
+      if (isM && (fix === FIX_YES || res === RES_OK)) {
         how = String(x[15] || '').split(',').map(function (id) { return CORR[id.trim()] || ''; }).filter(String).join(' , ');
       }
       var keys = isM ? [mid] : neuroTargets_(root), rows = isM ? mr.map : nr.map, pl = isM ? mPlan : nPlan;
@@ -247,20 +248,88 @@ function applyPending_(onlyTid) {
   return total;
 }
 
-// every 5 minutes: finish findings whose rows had not reached the Sheet yet
-function applyPending() {
+// ---- the empty result rows of a new treatment, created here instead of on the tablet --------------
+// The tablet used to upload them one by one (66 rows, several minutes). Now this script adds all of them
+// in one go, within a minute of the treatment reaching the Sheet. A treatment that already has rows in
+// a results sheet is never touched, so nothing is doubled.
+function genId_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 8); }
+
+function keysOf_(sheetName, keyCol) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName), res = [];
+  if (!sh || sh.getLastRow() < 2) return res;
+  var idx = headIdx_(sh), c = idx[keyCol] || 1;
+  var v = sh.getRange(2, c, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < v.length; i++) { var k = String(v[i][0]).trim(); if (k) res.push(k); }
+  return res;
+}
+
+function addRows_(resultSheet, keyCol, keys, tid) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(resultSheet);
+  if (!sh || !keys.length) return 0;
+  var idx = headIdx_(sh);
+  if (!idx.result_id || !idx.Treatment_ID || !idx[keyCol]) return 0;
+  var width = sh.getLastColumn(), now = new Date(), rows = [];
+  keys.forEach(function (k) {
+    var r = new Array(width);
+    for (var i = 0; i < width; i++) r[i] = '';
+    r[idx.result_id - 1] = genId_();
+    r[idx.Treatment_ID - 1] = tid;
+    r[idx[keyCol] - 1] = k;
+    if (idx.created_at) r[idx.created_at - 1] = now;
+    rows.push(r);
+  });
+  var start = sh.getLastRow() + 1;
+  sh.getRange(start, 1, rows.length, width).setValues(rows);
+  if (idx.created_at) sh.getRange(start, idx.created_at, rows.length, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+  return rows.length;
+}
+
+// returns how many treatments got their rows now
+function generateRows_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tsh = ss.getSheetByName('TREATMENTS');
+  if (!tsh || tsh.getLastRow() < 2) return 0;
+  var tids = keysOf_('TREATMENTS', 'Treatment_ID');
+  if (!tids.length) return 0;
+  var nHave = {}, mHave = {};
+  [['NEURO_RESULTS', nHave], ['MUSCLE_RESULTS', mHave]].forEach(function (p) {
+    var sh = ss.getSheetByName(p[0]);
+    if (!sh || sh.getLastRow() < 2) return;
+    var idx = headIdx_(sh);
+    if (!idx.Treatment_ID) return;
+    var v = sh.getRange(2, idx.Treatment_ID, sh.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < v.length; i++) { var t = String(v[i][0]).trim(); if (t) p[1][t] = (p[1][t] || 0) + 1; }
+  });
+  var nKeys = null, mKeys = null, made = 0;
+  tids.forEach(function (tid) {
+    var did = false;
+    if (!nHave[tid]) { nKeys = nKeys || keysOf_('NEURO_TESTS', 'test_id'); if (addRows_('NEURO_RESULTS', 'test_id', nKeys, tid)) did = true; }
+    if (!mHave[tid]) { mKeys = mKeys || keysOf_('MUSCLES', 'muscle_id'); if (addRows_('MUSCLE_RESULTS', 'muscle_id', mKeys, tid)) did = true; }
+    if (did) made++;
+  });
+  return made;
+}
+
+// every minute: create the rows of new treatments, then finish findings that were waiting for rows
+function tick() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) return;
-  try { applyPending_(''); } finally { try { lock.releaseLock(); } catch (e) {} }
+  try { generateRows_(); applyPending_(''); } finally { try { lock.releaseLock(); } catch (e) {} }
 }
+function applyPending() { tick(); } // old trigger name, kept so an old trigger still works
 
 function ensureApplyTrigger_() {
-  var has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'applyPending'; });
-  if (!has) ScriptApp.newTrigger('applyPending').timeBased().everyMinutes(5).create();
+  var has = false;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var fn = t.getHandlerFunction();
+    if (fn === 'tick') has = true;
+    else if (fn === 'applyPending') ScriptApp.deleteTrigger(t); // replaced by the 1-minute trigger
+  });
+  if (!has) ScriptApp.newTrigger('tick').timeBased().everyMinutes(1).create();
 }
 
-// Run once by hand if you want the 5-minute trigger without waiting for the first dictation.
-function installApplyTrigger() { ensureApplyTrigger_(); applyPending_(''); }
+// RUN THIS ONCE by hand in the editor (choose installApplyTrigger, press Run): it creates the 1-minute trigger.
+function installApplyTrigger() { ensureApplyTrigger_(); generateRows_(); applyPending_(''); }
 
 // ---- weekly backup of this whole spreadsheet into a Drive folder -------------
 function weeklyBackup() {

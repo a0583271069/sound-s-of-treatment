@@ -110,7 +110,7 @@ button.stop { background: var(--bad); color: #fff; border-color: var(--bad); }
 .status.on .dot { background: var(--bad); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .status.on .dot { animation: none; } }
-.interim { color: var(--muted); min-height: 1.5em; font-size: 18px; }
+.interim { color: var(--accent, #1f7a5f); min-height: 1.5em; font-size: 22px; font-weight: 600; }
 .small-note { color: var(--muted); font-size: 13px; }
 input[type=text], input[type=password], input[type=url], select {
   font: inherit; font-size: 16px; width: 100%; min-height: 44px; padding: 8px 10px; color: var(--fg);
@@ -189,8 +189,11 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
 
 <script>
 var ROOTS = ['C5','C6','C7','C8','T1','L2','L3','L4','L5','S1','S2'];
-var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שתי':2,'שלוש':3,'שלושה':3,'ארבע':4,'ארבעה':4,'חמש':5,'חמישה':5,'שש':6,'שישה':6,'שבע':7,'שבעה':7,'שמונה':8};
-var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
+var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שתי':2,'שלוש':3,'שלושה':3,'ארבע':4,'ארבעה':4,'חמש':5,'המש':5,'חמישה':5,'שש':6,'שישה':6,'שבע':7,'שבעה':7,'שמונה':8};
+var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','היה':'L','איך':'L','איל':'L','אייל':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
+var LETRE = Object.keys(LET).sort(function (a, b) { return b.length - a.length; }).join('|');
+// whole phrases the recognizer writes instead of a root ("קי אס ישיבה" is how Chrome heard C6)
+var PHRASEFIX = [[/(^|\s)קי\s+אס\s+ישיבה(?=\s|$)/g, '$1C6']];
 // whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
 var ROOTWORD = {'68':'C8','ששמונה':'C8'};
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
@@ -322,13 +325,14 @@ function isMuscle(r) { return /^M\d+$/.test(String(r || '')); }
 
 function normalize(t) {
   t = String(t || '').replace(/[.,;:!?״"׳'()\[\]]/g, ' ').replace(/[-–־]/g, ' ');
-  t = t.replace(/(^|\s)(אלה|אל|יש|אין|סיי|סי|אס|טי)(\d)/g, '$1$2 $3');
+  PHRASEFIX.forEach(function (pf) { t = t.replace(pf[0], pf[1]); });
+  t = t.replace(new RegExp('(^|\\s)(' + LETRE + ')(\\d)', 'g'), '$1$2 $3');
   var parts = t.split(/\s+/).filter(Boolean).map(function (w) {
     if (Object.prototype.hasOwnProperty.call(ROOTWORD, w)) return ROOTWORD[w];
     return Object.prototype.hasOwnProperty.call(NUM, w) ? String(NUM[w]) : w;
   });
   var s = ' ' + parts.join(' ') + ' ';
-  s = s.replace(/\s(אלה|אל|יש|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
+  s = s.replace(new RegExp('\\s(' + LETRE + ')\\s(\\d)(?=\\s)', 'g'), function (m, l, d) { return ' ' + LET[l] + d; });
   s = s.replace(/\s([LCSTlcst])\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + l.toUpperCase() + d; });
   return s.replace(/\s+/g, ' ').trim();
 }
@@ -339,18 +343,21 @@ function has(re, s) { return re.test(' ' + s + ' '); }
 var OKW = /^(?:תקין\S*|עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה)$/;
 var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
 var FIXW = /^(?:תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
-var SIDER = /^ה?(?:ימין|ימנית)$/, SIDEL = /^ה?(?:שמאל|שמאלית)$/, SIDEBOTH = /^ה?צדדים$/;
+var SIDER = /^ה?(?:ימין|ימנית)$/, SIDEL = /^ה?(?:שמאל|שמאלית)$/, SIDEBOTH = /^(?:ה?צדדים|שניהם|שניהן)$/;
+var BLOCKW = /^(?:ה?שרירים|ה?עצבים)$/; // "muscles" / "nerves": a new block starts, the last root no longer applies
 var SIDEHEAD = /^(?:ה?יד|ה?רגל|ב?צד)$/;
 
 // what the muscle was fixed with (the 7 reasons): "תוקן עצב", "תוקן NV ושיניים"
-var HOWHE = {R1:'עצב', R2:'מקור וחיבור', R3:'איבר', R4:'NV', R5:'NL', R6:'צלקות', R7:'שיניים'};
+var HOWHE = {R1:'עצב', R2:'מקור וחיבור', R3:'איבר', R4:'NV', R5:'NL', R6:'צלקות', R7:'שיניים', R9:'שיחררתי'};
+// "שיחררתי": the muscle works too strongly and was released with massage (goes with a result of "עובד")
+var RELW = /^(?:שיחרר\S*|שחרר\S*|שיחרור|הרפיתי|הרפיה)$/;
 var HOWCONN = /^(?:ו|עם|על|ידי|ב|באמצעות|דרך)$/;
 function howAt(toks, j) {
   var w = toks[j] || '', n = toks[j + 1] || '';
   if (/^ו?(?:אן|אנ|אין|n)$/i.test(w) && /^(?:וי|ווי|בי|v)$/i.test(n)) return { id: 'R4', n: 2 };
   if (/^ו?(?:אן|אנ|אין|n)$/i.test(w) && /^(?:אל|l)$/i.test(n)) return { id: 'R5', n: 2 };
   if (/^[וב]?(?:nv|אנוי|אנווי|אןוי)$/i.test(w)) return { id: 'R4', n: 1 };
-  if (/^[וב]?(?:nl|אנאל|אןאל)$/i.test(w)) return { id: 'R5', n: 1 };
+  if (/^[וב]?(?:nl|אנאל|אןאל|אימייל|אימיל)$/i.test(w)) return { id: 'R5', n: 1 }; // Chrome writes "en-el" as "אימייל"
   if (/^[וב]?עצב(?:ים|וב)?$/.test(w)) return { id: 'R1', n: 1 };
   if (/^[וב]?(?:מקור|חיבור|אחיזה)$/.test(w)) return { id: 'R2', n: (n === 'וחיבור' || n === 'חיבור') ? 2 : 1 };
   if (/^[וב]?(?:איבר|אבר|איברים)$/.test(w)) return { id: 'R3', n: 1 };
@@ -383,6 +390,15 @@ function markLast(list, ans, key, unmatched, how) {
   unmatched.push({ root: key, answer: ans });
 }
 
+// "שיחררתי": attach it to the last finding of this muscle (whatever its result)
+function markHow(list, key, ids) {
+  for (var i = list.length - 1; i >= 0; i--) {
+    var f = list[i];
+    if (f.muscle_id && f.key === key) { list.forEach(function (x) { if (x.g === f.g) x.how = ids.slice(); }); return true; }
+  }
+  return false;
+}
+
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
   var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0;
@@ -393,12 +409,12 @@ function parseMany(text) {
     return { root: m ? '' : root, muscle: m ? MBY[root] : '', muscle_id: m ? root : '', key: root, known: m || ROOTS.indexOf(root) >= 0,
       result: result, side: sd, dir: d, answer: null, phrase: phrase, g: g };
   }
-  // side of one finding: the side words said, else the "hand/leg + side" header, else a bend direction
+  // side of one finding: the side words said, else the bend direction (ימינה / שמאלה), else the "hand/leg + side" header
   function sidesFor(d, explicit) {
     if (explicit.length) return explicit;
-    if (sticky) return [sticky];
-    if (d === 'bendR') return ['right'];
+    if (d === 'bendR') return ['right'];   // "ימינה" / "שמאלה" say the side themselves, even after a "צד ימין" said earlier
     if (d === 'bendL') return ['left'];
+    if (sticky) return [sticky];
     return [null];
   }
   // Several directions + "problem": the last one wins (a slip of the tongue).
@@ -433,6 +449,7 @@ function parseMany(text) {
     if (rm) { flush(); if (isMuscle(root)) sticky = null; root = rm[1].toUpperCase() + rm[2]; rootAt = i; continue; }
     var mm = findMuscle(toks, i);
     if (mm) { flush(); if (root && !isMuscle(root)) sticky = null; root = mm.id; rootAt = i; i += mm.n - 1; continue; } // the "hand/leg + side" header ends when the nerve block turns into the muscle block
+    if (RELW.test(w)) { if (isMuscle(root)) markHow(out, root, ['R9']); continue; }
     if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
     if (FIXW.test(w)) { var hw = howAfter(toks, i); markLast(out, 'fixed', root, unmatched, hw.ids); i = hw.end; continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
@@ -456,7 +473,20 @@ function parseMany(text) {
       if (SIDEHEAD.test(pv)) { sticky = sd; sides = []; } else sides.push(sd);
       continue;
     }
-    if (SIDEBOTH.test(w)) { if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null; sides.push('right', 'left'); continue; }
+    if (SIDEBOTH.test(w)) {
+      // said right AFTER a result ("L5 עובד שניהם", "לא עובד שני הצדדים"): it belongs to that result
+      var prevf = out[out.length - 1];
+      if (prevf && !sides.length && i - lastEmit <= (w === 'שניהם' || w === 'שניהן' ? 1 : 2)) {
+        var gdirs = [], grp = out.filter(function (x) { return x.g === prevf.g; });
+        grp.forEach(function (x) { if (gdirs.indexOf(x.dir) < 0) gdirs.push(x.dir); });
+        out = out.filter(function (x) { return x.g !== prevf.g; });
+        gdirs.forEach(function (d) { ['right', 'left'].forEach(function (sd2) { var c = {}; for (var kk in prevf) c[kk] = prevf[kk]; c.dir = d; c.side = sd2; out.push(c); }); });
+        continue;
+      }
+      if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null;
+      sides.push('right', 'left'); continue;
+    }
+    if (BLOCKW.test(w)) { flush(); root = null; sticky = null; continue; }
     if (/^אחור\S*$/.test(w)) dirs.push('back');
     else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) dirs.push('fwd');
     else if (w === 'ימינה') dirs.push('bendR');
@@ -510,7 +540,7 @@ said.addEventListener('input', function () { lsSet(DRAFT, said.value); });
 $('clear').onclick = function () {
   var b = $('clear');
   if (!said.value) return;
-  if (b.dataset.sure === '1') { said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; lastPiece = ''; setAuto(''); b.textContent = 'נקה טקסט'; b.dataset.sure = ''; }
+  if (b.dataset.sure === '1') { said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); b.textContent = 'נקה טקסט'; b.dataset.sure = ''; }
   else { b.dataset.sure = '1'; b.textContent = 'לחץ שוב למחיקה'; setTimeout(function () { b.dataset.sure = ''; b.textContent = 'נקה טקסט'; }, 3000); }
 };
 
@@ -522,39 +552,63 @@ function note(txt) { var n = $('sysnote'); n.hidden = !txt; n.textContent = txt 
 function setStatus(on, txt) { $('status').classList.toggle('on', on); $('statusText').textContent = txt; }
 
 var TLK = 'clinic-timeline-v1';
-var tl = [], recStart = 0, lastPiece = '', lastPieceAt = 0, pendingId = null, autoTimer = null, lastSaved = '', saving = false;
+var tl = [], recStart = 0, recent = [], pendingId = null, autoTimer = null, lastSaved = '', saving = false;
+var pendInterim = '', stableTimer = null;
 (function () {
   try { var o = JSON.parse(lsGet(TLK) || 'null'); if (o && said.value) { tl = o.tl || []; recStart = o.start || 0; pendingId = o.sid || null; } } catch (e) {}
 })();
 function saveTl() { lsSet(TLK, JSON.stringify({ tl: tl, start: recStart, sid: pendingId })); }
 function wordsOf(x) { return String(x).split(/\s+/).filter(Boolean); }
-// Android Chrome keeps re-sending the growing sentence as a new "final" result.
-// If the new text is the same sentence extended/corrected (and arrives within a few seconds), replace instead of append.
-// Only a sentence that GREW (same beginning, not shorter) replaces the old one. A shorter or different
-// piece is always appended, so nothing already written can be deleted by mistake.
-function sameSeg(a, b) {
-  var A = wordsOf(a), B = wordsOf(b);
-  if (!A.length || B.length < A.length) return false;
-  var k = Math.max(1, Math.ceil(A.length * 0.6));
-  for (var i = 0; i < k; i++) if (A[i] !== B[i]) return false;
+
+// Android Chrome keeps re-sending the same sentence, each time longer ("A", then "A B", then "A B C"), as a new
+// "final" result, sometimes minutes apart. If a new piece only EXTENDS what is already at the end of the box
+// (same beginning, nothing else), it replaces that text instead of being added again. A shorter piece that is
+// already contained at the start of the last text is dropped. Anything else is appended, so nothing said
+// is ever deleted. No time limit: the repetition can come late.
+function extendsOld(oldW, newW) {
+  if (!oldW.length || newW.length < oldW.length) return false;
+  var need = oldW.length <= 2 ? oldW.length : Math.ceil(oldW.length * 0.75);
+  for (var i = 0; i < need; i++) if (newW[i] !== oldW[i]) return false;
+  return true;
+}
+function containedInOld(oldW, newW) {
+  if (!newW.length || newW.length >= oldW.length) return false;
+  for (var i = 0; i < newW.length; i++) if (newW[i] !== oldW[i]) return false;
   return true;
 }
 function addFinal(t) {
   t = String(t || '').trim();
-  if (!t) return;
+  if (!t || !/[A-Za-z0-9֐-׿]/.test(t)) return; // nothing but dashes / dots
   var now = Date.now();
   if (!recStart) recStart = now;
-  var cur = said.value.replace(/\s+$/, '');
-  if (lastPiece && now - lastPieceAt < 3500 && cur.slice(-lastPiece.length) === lastPiece && sameSeg(lastPiece, t)) {
-    cur = cur.slice(0, cur.length - lastPiece.length).replace(/\s+$/, '');
-    if (tl.length && tl[tl.length - 1][1] === lastPiece) tl[tl.length - 1][1] = t;
-  } else {
-    tl.push([Math.round((now - recStart) / 1000), t]);
+  var cur = said.value.replace(/\s+$/, ''), tw = wordsOf(t), handled = false;
+  for (var k = Math.min(recent.length, 4); k >= 1 && !handled; k--) {
+    var tail = recent.slice(-k).join(' ');
+    if (cur.slice(-tail.length) !== tail) continue;
+    var ow = wordsOf(tail);
+    if (containedInOld(ow, tw)) { handled = true; t = tail; k = 0; break; } // already have it
+    if (extendsOld(ow, tw)) {
+      cur = cur.slice(0, cur.length - tail.length).replace(/\s+$/, '');
+      var first = null;
+      for (var j = 0; j < k && tl.length; j++) { first = tl.pop(); }
+      tl.push([first ? first[0] : Math.round((now - recStart) / 1000), t]);
+      recent = recent.slice(0, recent.length - k);
+      handled = 'replaced';
+    }
   }
-  lastPiece = t; lastPieceAt = now;
+  if (handled === true) return;
+  if (handled !== 'replaced') tl.push([Math.round((now - recStart) / 1000), t]);
+  recent.push(t); if (recent.length > 6) recent.shift();
   said.value = (cur ? cur + ' ' : '') + t;
   lsSet(DRAFT, said.value); saveTl();
   said.scrollTop = said.scrollHeight;
+}
+// text the recognizer has heard but not "finalized" yet (it often never does before the session ends):
+// write it into the box so it is not lost
+function commitInterim() {
+  if (stableTimer) { clearTimeout(stableTimer); stableTimer = null; }
+  var t = pendInterim.trim(); pendInterim = '';
+  if (t) addFinal(t);
 }
 
 function setAuto(txt) { var n = $('autosave'); if (n) n.textContent = txt || ''; }
@@ -588,7 +642,12 @@ function buildRec() {
       var r = ev.results[i];
       if (r.isFinal) addFinal(r[0].transcript); else interim += r[0].transcript + ' ';
     }
-    $('interim').textContent = interim;
+    $('interim').textContent = interim ? '🎙 ' + interim : '';
+    var changed = interim.trim() !== pendInterim;
+    pendInterim = interim.trim();
+    if (stableTimer && changed) { clearTimeout(stableTimer); stableTimer = null; }
+    // heard but not finalized for 4 seconds: keep it anyway (a later final that extends it replaces it)
+    if (pendInterim && !stableTimer) stableTimer = setTimeout(function () { stableTimer = null; if (wantOn) { commitInterim(); } }, 4000);
   };
   rec.onerror = function (ev) {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
@@ -601,6 +660,7 @@ function buildRec() {
     // no-speech / aborted: onend restarts
   };
   rec.onend = function () {
+    commitInterim();
     $('interim').textContent = '';
     if (wantOn) {
       setStatus(true, 'מחדש האזנה…');
@@ -631,10 +691,10 @@ function getWake() {
 function releaseWake() { try { if (wake) wake.release(); } catch (e) {} wake = null; }
 
 $('toggle').onclick = function () {
-  if (wantOn) { wantOn = false; try { rec.stop(); } catch (e) {} releaseWake(); setStatus(false, 'לא מקליט'); syncBtn(); if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } setTimeout(autosave, 800); return; }
+  if (wantOn) { wantOn = false; commitInterim(); try { rec.stop(); } catch (e) {} releaseWake(); setStatus(false, 'לא מקליט'); syncBtn(); if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } setTimeout(autosave, 800); return; }
   if (!SR) { note('הדפדפן הזה לא תומך בהקלטה. פתח את הדף ב-Chrome.'); return; }
   note('');
-  wantOn = true; restarts = 0; lastPiece = '';
+  wantOn = true; restarts = 0; recent = [];
   if (!pendingId) { pendingId = newId(); } saveTl();
   if (autoTimer) clearInterval(autoTimer); autoTimer = setInterval(autosave, 120000);
   buildRec();
@@ -657,7 +717,12 @@ function analyze() {
   if (wantOn) $('toggle').click();
   note('');
   var all = parseMany(text);
-  found = all.filter(function (f) { return f.result; });
+  // the same finding said or heard twice counts once
+  var seen = {};
+  found = all.filter(function (f) { return f.result; }).filter(function (f) {
+    var key = [f.key, f.side, f.dir, f.result, f.answer, (f.how || []).join(',')].join('|');
+    if (seen[key]) return false; seen[key] = 1; return true;
+  });
   var dg = all.dangling || [], un = all.unmatched || [];
   var parts = [];
   if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
@@ -726,7 +791,7 @@ $('send').onclick = function () {
         msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.'
           + (j.waiting > 0 ? ' השורות של הטיפול עוד לא הגיעו מהטאבלט לגיליון. הממצאים ייכנסו אליהן אוטומטית תוך כמה דקות, ואז לרענן את האפליקציה.'
             : j.done > 0 ? ' הממצאים נכתבו לשורות הטיפול. לרענן את האפליקציה כדי לראות אותם.' : '');
-        said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; lastPiece = ''; setAuto(''); found = [];
+        said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); found = [];
         $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true;
       } else {
         msg.className = 'errmsg';
