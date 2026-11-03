@@ -291,20 +291,29 @@ function generateRows_() {
   if (!tsh || tsh.getLastRow() < 2) return 0;
   var tids = keysOf_('TREATMENTS', 'Treatment_ID');
   if (!tids.length) return 0;
+  // which test / muscle each treatment already has, so a later addition to
+  // NEURO_TESTS or MUSCLES is filled in afterwards instead of being missed
   var nHave = {}, mHave = {};
-  [['NEURO_RESULTS', nHave], ['MUSCLE_RESULTS', mHave]].forEach(function (p) {
+  [['NEURO_RESULTS', 'test_id', nHave], ['MUSCLE_RESULTS', 'muscle_id', mHave]].forEach(function (p) {
     var sh = ss.getSheetByName(p[0]);
     if (!sh || sh.getLastRow() < 2) return;
     var idx = headIdx_(sh);
-    if (!idx.Treatment_ID) return;
-    var v = sh.getRange(2, idx.Treatment_ID, sh.getLastRow() - 1, 1).getValues();
-    for (var i = 0; i < v.length; i++) { var t = String(v[i][0]).trim(); if (t) p[1][t] = (p[1][t] || 0) + 1; }
+    if (!idx.Treatment_ID || !idx[p[1]]) return;
+    var n = sh.getLastRow() - 1;
+    var tv = sh.getRange(2, idx.Treatment_ID, n, 1).getValues();
+    var kv = sh.getRange(2, idx[p[1]], n, 1).getValues();
+    for (var i = 0; i < n; i++) {
+      var t = String(tv[i][0]).trim();
+      if (t) (p[2][t] = p[2][t] || {})[String(kv[i][0]).trim()] = true;
+    }
   });
-  var nKeys = null, mKeys = null, made = 0;
+  var nKeys = keysOf_('NEURO_TESTS', 'test_id'), mKeys = keysOf_('MUSCLES', 'muscle_id'), made = 0;
   tids.forEach(function (tid) {
     var did = false;
-    if (!nHave[tid]) { nKeys = nKeys || keysOf_('NEURO_TESTS', 'test_id'); if (addRows_('NEURO_RESULTS', 'test_id', nKeys, tid)) did = true; }
-    if (!mHave[tid]) { mKeys = mKeys || keysOf_('MUSCLES', 'muscle_id'); if (addRows_('MUSCLE_RESULTS', 'muscle_id', mKeys, tid)) did = true; }
+    var missN = nKeys.filter(function (k) { return !(nHave[tid] && nHave[tid][k]); });
+    var missM = mKeys.filter(function (k) { return !(mHave[tid] && mHave[tid][k]); });
+    if (missN.length && addRows_('NEURO_RESULTS', 'test_id', missN, tid)) did = true;
+    if (missM.length && addRows_('MUSCLE_RESULTS', 'muscle_id', missM, tid)) did = true;
     if (did) made++;
   });
   return made;
