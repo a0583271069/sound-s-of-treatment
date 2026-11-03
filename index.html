@@ -169,7 +169,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
       <button class="primary" id="analyze" type="button">סיים ובדוק</button>
       <button id="clear" type="button">נקה טקסט</button>
     </div>
-    <p class="small-note">הדף מזהה את המילים בעברית (תקין, לא עובד, אחורה, תוקן וכו'). בשפות אחרות הטקסט נשמר כמו שהוא, אבל הממצאים לא יזוהו.</p>
+    <p class="small-note">הדף מזהה את המילים בעברית (תקין, לא עובד, ימין, שמאל, תוקן, לא תוקן וכו'). אפשר לומר "יד ימין" או "רגל שמאל" פעם אחת והצד נשאר עד שמחליפים אותו. בשפות אחרות הטקסט נשמר כמו שהוא, אבל הממצאים לא יזוהו.</p>
   </section>
 
   <div class="note" id="notice" aria-live="polite" hidden></div>
@@ -193,11 +193,132 @@ var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שת�
 var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','סי':'C','סיי':'C','אס':'S','טי':'T'};
 // whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
 var ROOTWORD = {'68':'C8','ששמונה':'C8'};
-// muscles the dictation knows by name (heard variants -> one canonical name). Only piriformis so far.
-var MUSCLES = {'פיריפורמיס':'פיריפורמיס','פרפורמיס':'פיריפורמיס','רפורמיס':'פיריפורמיס','פיריפורמס':'פיריפורמיס','פירפורמס':'פיריפורמיס','פירפורמיס':'פיריפורמיס'};
-var MUSCLE_NAMES = ['פיריפורמיס'];
-function isMuscle(r) { return MUSCLE_NAMES.indexOf(r) >= 0; }
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
+var SIDES = {right:'ימין', left:'שמאל'};
+
+// ---- muscles the dictation knows by name -----------------------------------
+// [muscle_id (as in the MUSCLES sheet), latin name, spoken Hebrew spellings separated by |].
+// Spellings only need to be close: words are compared by sound (see pkey / kmatch).
+var MDB = [
+  ['M01','gluteus medius','גלוטאוס מדיוס|גלוטיאוס מדיוס|גלוטאוס מדיאוס|גלוטאוס מדיום'],
+  ['M02','tensor fasciae latae','טנסור פשיה לטה|טנסור פאשיה לאטה|טנסור פשיה לאטה|טנסור|טי אף אל|tfl'],
+  ['M03','iliopsoas (Psoas + Iliacus)','איליופסואס|אילאופסואס|איליאופסואס|איליופסואז|פסואס|פסואז|איליאקוס'],
+  ['M04','quadriceps femoris','קוואדריספס|קוודריספס|קוואדריצפס|קוודריצפס|קוואדריספס פמוריס|קוודריספס פמוריס'],
+  ['M05','rectus femoris','רקטוס פמוריס|רקטוס פמורוס|רקטוס פמורס'],
+  ['M06','vastus lateralis','וסטוס לטרליס|ווסטוס לטרליס|וסטוס לטראליס|ווסטוס לטראליס|וסטוס לטרלס'],
+  ['M07','vastus medialis','וסטוס מדיאליס|ווסטוס מדיאליס|וסטוס מדיאלס'],
+  ['M08','vastus intermedius','וסטוס אינטרמדיוס|ווסטוס אינטרמדיוס|וסטוס אינטרמדיאוס'],
+  ['M09','adductores','אדוקטורס|אדוקטורים|אדוקטור|אדוקטורז'],
+  ['M10','quadratus lumborum','קוואדרטוס לומבורום|קוודרטוס לומבורום|קוואדרטוס|קוודרטוס'],
+  ['M11','sartorius','סרטוריוס|סארטוריוס|סרטוריאוס'],
+  ['M12','gastrocnemius','גסטרוקנמיוס|גסטרוקנימיוס|גסטרוקנמיאוס|תאומים|שריר התאומים'],
+  ['M13','gastrocnemius (caput lat.)','גסטרוקנמיוס לטרלי|גסטרוקנמיוס לטראלי|גסטרוקנמיוס חיצוני|גסטרוקנימיוס לטרלי|תאומים חיצוני'],
+  ['M14','gastrocnemius (caput med.)','גסטרוקנמיוס מדיאלי|גסטרוקנמיוס פנימי|גסטרוקנימיוס מדיאלי|תאומים פנימי'],
+  ['M15','popliteus','פופליטאוס|פופליטיוס|פופליטוס|פופליטאס'],
+  ['M16','tibialis anterior','טיביאליס אנטריור|טיביאליס קדמי|טיביאליס אנטיריור|טיביאליס אנטרור|טיביאלוס אנטריור'],
+  ['M17','fibularis (peroneus)','פרונאוס|פיברולריס|פיבולריס|פרוניאוס|פרוניאל|פרונאל|פרונאוס לונגוס'],
+  ['M18','tibialis posterior','טיביאליס פוסטריור|טיביאליס אחורי|טיביאליס פוסטיריור|טיביאלוס פוסטריור'],
+  ['M19','gluteus maximus','גלוטאוס מקסימוס|גלוטאוס מכסימוס|גלוטיאוס מקסימוס|גלוטאוס מקסימום'],
+  ['M20','hamstrings','המסטרינג|המסטרינגס|המסטרינגז|המסטרינג'],
+  ['M21','biceps femoris','ביספס פמוריס|ביצפס פמוריס|ביספס פמורוס|ביספס פמורס'],
+  ['M22','semitendinosus / semimembranosus','סמיטנדינוזוס|סמיטנדינוסוס|סמימבראנוזוס|סמימברנוסוס|סמיטנדינוזוס סמימבראנוזוס|סמי טנדינוזוס'],
+  ['M23','piriformis','פיריפורמיס|פרפורמיס|פירפורמיס|פיריפורמס|פירפורמס|רפורמיס|פירי פורמיס|פיריפורמיוס'],
+  ['M24','soleus','סולאוס|סוליאוס|סוליוס|סולאוז'],
+  ['M25','erector spinae','ארקטור ספיינה|אריקטור ספיינה|ארקטור ספינה|ארקטור ספיני|ארקטור'],
+  ['M27','transversospinales','טרנסוורסוספינליס|טרנסברסוספינליס|טרנסוורסו ספינליס|טרנסברסו ספינליס|טרנסוורסוספינאליס'],
+  ['M28','splenius','ספלניוס|ספלניאוס|ספלניוס'],
+  ['M29','rectus abdominis (pars sup., ülés 75°)','רקטוס אבדומיניס עליון|רקטוס אבדומינס עליון|רקטוס אבדומיניס עליונה|רקטוס עליון'],
+  ['M30','rectus abdominis (pars inf., ülés 90°)','רקטוס אבדומיניס תחתון|רקטוס אבדומינס תחתון|רקטוס אבדומיניס תחתונה|רקטוס תחתון'],
+  ['M31','obliquus externus abdominis','אובליקוס חיצוני|אובליקוס אקסטרנוס|אוביקוס אקסטרנוס|אוביליקוס חיצוני|אובליקוס אקסטרנאוס'],
+  ['M32','obliquus internus abdominis','אובליקוס פנימי|אובליקוס אינטרנוס|אוביקוס אינטרנוס|אוביליקוס פנימי|אובליקוס אינטרנאוס'],
+  ['M33','pectoralis major (pars clav.)','פקטורליס קלביקולרי|פקטורליס קלביקולריס|פקטורליס מייגור קלביקולרי|פקטורליס עליון|פקטורליס מג׳ור קלביקולרי'],
+  ['M34','pectoralis major (pars stern.)','פקטורליס סטרנלי|פקטורליס סטרנאלי|פקטורליס מייגור סטרנלי|פקטורליס תחתון|פקטורליס סטרנליס'],
+  ['M35','longus colli','לונגוס קולי|לונגוס קולי|לונגס קולי'],
+  ['M36','sternocleidomastoideus','סטרנוקלידומסטואידיאוס|סטרנוקלידומסטואיד|סטרנוקלידומסטואידאוס|אס סי אם|scm|sternocleidomastoid'],
+  ['M37','scaleni','סקאלני|סקלני|סקאלניוס|סקאלנוס|סקלניוס'],
+  ['M38','supraspinatus','סופרספינטוס|סופרהספינטוס|סופראספינטוס|סופרה ספינטוס|סופרה ספינאטוס|סופרספינאטוס|סופרהספינאטוס|סופרא ספינטוס'],
+  ['M39','latissimus dorsi','לטיסימוס דורסי|לטישימוס דורסי|לטיסימוס|לאטיסימוס דורסי|לטיסימוס דורסאי|לטיסימוס דורסי'],
+  ['M40','trapezius (pars trans./med.)','טרפזיוס אמצעי|טרפז אמצעי|טרפזיוס מדיאלי|טרפזיוס אמצע|טרפז אמצע'],
+  ['M41','trapezius (pars asc./inf.)','טרפזיוס תחתון|טרפז תחתון|טרפזיוס תחתונה|טרפז תחתונה'],
+  ['M42','trapezius (pars desc./sup.)','טרפזיוס עליון|טרפז עליון|טרפזיוס עליונה|טרפז עליונה'],
+  ['M43','serratus anterior','סראטוס אנטריור|סרטוס אנטריור|סראטוס אנטיריור|סרטוס קדמי|סראטוס קדמי|סראטוס|סרטוס'],
+  ['M44','deltoideus','דלטואידאוס|דלתואידאוס|דלטואיד|דלתא|דלטואידוס|דלטואיד אמצעי|דלתא אמצעי|דלטואידאוס אמצעי'],
+  ['M45','deltoideus (pars clav./ant.)','דלטואיד קדמי|דלתא קדמי|דלטואידאוס קדמי|דלטואיד קדמית|דלתא קדמית'],
+  ['M46','deltoideus (pars spin./post.)','דלטואיד אחורי|דלתא אחורי|דלטואידאוס אחורי|דלטואיד אחורית|דלתא אחורית'],
+  ['M47','infraspinatus','אינפרספינטוס|אינפראספינטוס|אינפרהספינטוס|אינפרה ספינטוס|אינפרא ספינטוס|אינפרספינאטוס|אינפרהספינאטוס'],
+  ['M48','subscapularis','סובסקפולריס|סאבסקפולריס|סבסקפולריס|סובסקפולאריס|סאבסקפולאריס'],
+  ['M49','rhomboidei','רומבואידס|רומבואיד|רומבואידי|רומבוידס|רומבוידי|רומבואידיי'],
+  ['M50','levator scapulae','לבטור סקפולה|לווטור סקפולה|לבאטור סקפולה|לבטור סקפולי|לוואטור סקפולי|לבאטור סקפולי|לווטור סקפולי|לבטור'],
+  ['M51','teres minor','טרס מינור|טרס מיינור|טירס מינור|טרס מינר'],
+  ['M52','biceps brachii','ביספס ברכיי|ביספס ברכיאי|ביספס ברקיי|ביספס ברכיאלי|ביספס|ביצפס'],
+  ['M53','brachioradialis','ברכיורדיאליס|ברכיורדיאלס|ברכיו רדיאליס|ברקיורדיאליס|ברכיורדיאלי'],
+  ['M54','triceps brachii','טרייספס|טריספס|טרייצפס|טריצפס|טרייספס ברכיי|טרייספס ברכיאי'],
+  ['M55','coracobrachialis','קורקוברכיאליס|קורקו ברכיאליס|קורקוברקיאליס|קורקוברכיאלס']
+];
+var MBY = {};
+MDB.forEach(function (m) { MBY[m[0]] = m[1]; });
+
+// sound key of a word: no vowel letters, similar consonants merged, repeats collapsed
+function pkey(w) {
+  var s = String(w || '').toLowerCase().replace(/[֑-ׇ]/g, '');
+  var a = s;
+  s = s.replace(/ך/g, 'כ').replace(/ם/g, 'מ').replace(/ן/g, 'נ').replace(/ף/g, 'פ').replace(/ץ/g, 'צ');
+  s = s.replace(/ק/g, 'כ').replace(/ט/g, 'ת').replace(/ח/g, 'כ');
+  if (/[א-ת]/.test(s)) s = s.replace(/[אעהוי]/g, '');
+  s = s.replace(/(.)\1+/g, '$1');
+  return s || a;
+}
+function lev(a, b) {
+  var p = [], i, j;
+  for (j = 0; j <= b.length; j++) p[j] = j;
+  for (i = 1; i <= a.length; i++) {
+    var prev = p[0]; p[0] = i;
+    for (j = 1; j <= b.length; j++) {
+      var t = p[j];
+      p[j] = Math.min(p[j] + 1, p[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = t;
+    }
+  }
+  return p[b.length];
+}
+// distance between two sound keys; 99 = not close enough to count as the same word
+function kdist(a, b) {
+  if (a === b) return 0;
+  var m = Math.min(a.length, b.length);
+  if (m < 4) return 99;
+  var d = lev(a, b);
+  return (d <= 1 || (m >= 7 && d <= 2)) ? d : 99;
+}
+var MALIAS = [];
+MDB.forEach(function (m) {
+  m[2].split('|').forEach(function (v) {
+    var ws = v.trim().split(/\s+/).map(pkey).filter(Boolean);
+    if (ws.length) MALIAS.push({ id: m[0], ws: ws });
+  });
+});
+// the muscle named at token position i: the longest spoken name wins; among those the closest sound.
+// If two different muscles are equally close (e.g. supra- / infraspinatus misheard), nothing is matched.
+function findMuscle(toks, i) {
+  var cands = [];
+  for (var a = 0; a < MALIAS.length; a++) {
+    var al = MALIAS[a], tot = 0;
+    for (var k = 0; k < al.ws.length; k++) {
+      var t = toks[i + k];
+      var d = t == null ? 99 : kdist(pkey(t), al.ws[k]);
+      if (d >= 99) { tot = 99; break; }
+      tot += d;
+    }
+    if (tot < 99) cands.push({ id: al.id, n: al.ws.length, d: tot });
+  }
+  if (!cands.length) return null;
+  var n = Math.max.apply(null, cands.map(function (c) { return c.n; }));
+  cands = cands.filter(function (c) { return c.n === n; });
+  var d = Math.min.apply(null, cands.map(function (c) { return c.d; }));
+  cands = cands.filter(function (c) { return c.d === d; });
+  var ids = cands.map(function (c) { return c.id; }).filter(function (x, i2, ar) { return ar.indexOf(x) === i2; });
+  return ids.length === 1 ? { id: ids[0], n: n } : null;
+}
+function isMuscle(r) { return /^M\d+$/.test(String(r || '')); }
 
 function normalize(t) {
   t = String(t || '').replace(/[.,;:!?״"׳'()\[\]]/g, ' ').replace(/[-–־]/g, ' ');
@@ -207,7 +328,6 @@ function normalize(t) {
     return Object.prototype.hasOwnProperty.call(NUM, w) ? String(NUM[w]) : w;
   });
   var s = ' ' + parts.join(' ') + ' ';
-  s = s.replace(/\sפירי פורמ(?:יס|ס)(?=\s)/g, ' פיריפורמיס');
   s = s.replace(/\s(אלה|אל|יש|אין|סיי|סי|אס|טי)\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + LET[l] + d; });
   s = s.replace(/\s([LCSTlcst])\s(\d)(?=\s)/g, function (m, l, d) { return ' ' + l.toUpperCase() + d; });
   return s.replace(/\s+/g, ' ').trim();
@@ -215,67 +335,61 @@ function normalize(t) {
 
 function has(re, s) { return re.test(' ' + s + ' '); }
 
-function parse(text, pending) {
-  var s = normalize(text);
-  var out = { root: null, known: false, result: null, side: null, dir: null, answer: null, norm: s };
-  var m = /(?:^|\s)([LCST])(\d)(?=\s|$)/i.exec(s);
-  if (m) {
-    out.root = m[1].toUpperCase() + m[2];
-    out.known = ROOTS.indexOf(out.root) >= 0;
-  }
-  if (has(/\sלא (?:תוק[נן]|תוכ[נן]|תיקנ)\S*\s/, s)) out.answer = 'notfixed';
-  else if (has(/\s(?:תוק[נן]|תוכ[נן]|תיקנ)\S*\s/, s)) out.answer = 'fixed';
-  else if (s === 'כן') out.answer = 'fixed';
-  else if (s === 'לא') out.answer = 'notfixed';
-
-  var cleaned = s.replace(/לא (?:תוק[נן]|תוכ[נן]|תיקנ)\S*/g, ' ').replace(/(?:תוק[נן]|תוכ[נן]|תיקנ)\S*/g, ' ');
-  if (has(/\s(לא תקין\S*|לא עובד\S*|לא טוב|חלש\S*|בעיה)\s/, ' ' + cleaned + ' ')) out.result = 'problem';
-  else if (has(/\s(תקין\S*|עובד\S*|חזק\S*|בסדר)\s/, ' ' + cleaned + ' ')) out.result = 'ok';
-
-  s.split(' ').forEach(function (w) {
-    if (/^אחור\S*$/.test(w)) out.dir = 'back';
-    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) out.dir = 'fwd';
-    else if (w === 'ימינה' || w === 'ימין') out.dir = 'bendR';
-    else if (w === 'שמאלה' || w === 'שמאל') out.dir = 'bendL';
-  });
-  if (pending && !out.root && !out.answer && !out.result) {
-    if (has(/\sלא\s/, s)) out.answer = 'notfixed';
-    else if (has(/\s(?:כן|בוצע)\s/, s)) out.answer = 'fixed';
-  }
-  return out;
-}
-
-// Several findings in one dictation: "c2 עובד c3 תקין c6 שמאלה לא עובד ימינה עובד"
+// Several findings in one dictation: "c2 עובד c3 תקין c6 שמאל לא עובד תוקן ימין עובד"
 var OKW = /^(?:תקין\S*|עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה)$/;
 var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
 var FIXW = /^(?:תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
+var SIDER = /^ה?(?:ימין|ימנית)$/, SIDEL = /^ה?(?:שמאל|שמאלית)$/, SIDEBOTH = /^ה?צדדים$/;
+var SIDEHEAD = /^(?:ה?יד|ה?רגל|ב?צד)$/;
 
-function markLast(list, ans, root, unmatched) {
+function markLast(list, ans, key, unmatched) {
   for (var i = list.length - 1; i >= 0; i--) {
-    if (list[i].result === 'problem' && !list[i].answer && (!root || (list[i].muscle || list[i].root) === root)) { list[i].answer = ans; return; }
+    var f = list[i];
+    if (f.result === 'problem' && !f.answer && (!key || f.key === key)) {
+      list.forEach(function (x) { if (x.g === f.g && !x.answer) x.answer = ans; });
+      return;
+    }
   }
-  unmatched.push({ root: root, answer: ans });
+  unmatched.push({ root: key, answer: ans });
 }
 
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
-  var out = [], root = null, dirs = [], sides = [], unmatched = [], dangling = [], lastEmit = -99, allDirs = false;
+  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0;
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
-  // Four directions only. Several directions + "problem": the last one wins (a slip of the tongue).
+  function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
+  function mk(result, d, sd, phrase, g) {
+    var m = isMuscle(root);
+    return { root: m ? '' : root, muscle: m ? MBY[root] : '', muscle_id: m ? root : '', key: root, known: m || ROOTS.indexOf(root) >= 0,
+      result: result, side: sd, dir: d, answer: null, phrase: phrase, g: g };
+  }
+  // side of one finding: the side words said, else the "hand/leg + side" header, else a bend direction
+  function sidesFor(d, explicit) {
+    if (explicit.length) return explicit;
+    if (sticky) return [sticky];
+    if (d === 'bendR') return ['right'];
+    if (d === 'bendL') return ['left'];
+    return [null];
+  }
+  // Several directions + "problem": the last one wins (a slip of the tongue).
   // Several directions + "ok": every direction named is ok.
   function emit(result, at, end) {
+    var to = end == null ? at : end;
     if (root) {
-      var ds = dirs.filter(function (d, i) { return dirs.indexOf(d) === i; });
+      var ds = uniq(dirs);
       if (result === 'problem' && ds.length > 1 && !allDirs) ds = [ds[ds.length - 1]];
       if (!ds.length) ds = [null];
-      var to = end == null ? at : end;
       var ph = toks.slice(Math.max(rootAt, lastEnd + 1), to + 1);
       if (ph.length > 12) ph = ph.slice(ph.length - 12);
       var phrase = ph.join(' ');
+      var ex = uniq(sides);
+      gid++;
       ds.forEach(function (d) {
-        out.push({ root: isMuscle(root) ? '' : root, muscle: isMuscle(root) ? root : '', known: ROOTS.indexOf(root) >= 0 || isMuscle(root), result: result, side: null, dir: d, answer: null, phrase: phrase });
+        sidesFor(d, ex).forEach(function (sd) { out.push(mk(result, d, sd, phrase, gid)); });
       });
       lastEmit = at; lastEnd = to;
+    } else {
+      orphans.push(toks.slice(Math.max(0, at - 4), to + 1).join(' '));
     }
     dirs = []; sides = []; allDirs = false;
   }
@@ -284,10 +398,11 @@ function parseMany(text) {
     dirs = []; sides = []; allDirs = false;
   }
   for (var i = 0; i < toks.length; i++) {
-    var w = toks[i], nx = toks[i + 1] || '';
+    var w = toks[i], nx = toks[i + 1] || '', pv = toks[i - 1] || '';
     var rm = /^([LCST])(\d)$/i.exec(w);
-    if (rm) { flush(); root = rm[1].toUpperCase() + rm[2]; rootAt = i; continue; }
-    if (Object.prototype.hasOwnProperty.call(MUSCLES, w)) { flush(); root = MUSCLES[w]; rootAt = i; continue; }
+    if (rm) { flush(); if (isMuscle(root)) sticky = null; root = rm[1].toUpperCase() + rm[2]; rootAt = i; continue; }
+    var mm = findMuscle(toks, i);
+    if (mm) { flush(); if (root && !isMuscle(root)) sticky = null; root = mm.id; rootAt = i; i += mm.n - 1; continue; } // the "hand/leg + side" header ends when the nerve block turns into the muscle block
     if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
     if (FIXW.test(w)) { markLast(out, 'fixed', root, unmatched); continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
@@ -295,23 +410,32 @@ function parseMany(text) {
     if (OKW.test(w)) { emit('ok', i); continue; }
     if (/^ה?כיוונים$/.test(w)) {
       var prev = out[out.length - 1];
-      if (prev && (prev.muscle || prev.root) === root && prev.dir === null && i - lastEmit <= 3) {
-        var res = prev.result, sd = prev.side;
+      if (prev && prev.key === root && prev.dir === null && i - lastEmit <= 3) {
+        var res = prev.result, psd = prev.side, pph = (prev.phrase || '') + ' ' + w, pg = prev.g;
         out.pop();
         ['fwd', 'back', 'bendR', 'bendL'].forEach(function (d) {
-          out.push({ root: isMuscle(root) ? '' : root, muscle: isMuscle(root) ? root : '', known: ROOTS.indexOf(root) >= 0 || isMuscle(root), result: res, side: sd, dir: d, answer: null, phrase: ((prev.phrase || '') + ' ' + w).trim() });
+          var f = mk(res, d, psd || sidesFor(d, [])[0], pph.trim(), pg);
+          out.push(f);
         });
       } else { dirs = ['fwd', 'back', 'bendR', 'bendL']; allDirs = true; }
       continue;
     }
+    // sides: "יד ימין" / "רגל שמאל" / "צד ימין" stay until changed; a bare "ימין" / "שמאל" counts for the next result only
+    var sd = SIDER.test(w) ? 'right' : SIDEL.test(w) ? 'left' : null;
+    if (sd) {
+      if (SIDEHEAD.test(pv)) { sticky = sd; sides = []; } else sides.push(sd);
+      continue;
+    }
+    if (SIDEBOTH.test(w)) { if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null; sides.push('right', 'left'); continue; }
     if (/^אחור\S*$/.test(w)) dirs.push('back');
     else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) dirs.push('fwd');
-    else if (w === 'ימינה' || w === 'ימין') dirs.push('bendR');
-    else if (w === 'שמאלה' || w === 'שמאל') dirs.push('bendL');
+    else if (w === 'ימינה') dirs.push('bendR');
+    else if (w === 'שמאלה') dirs.push('bendL');
   }
   flush();
   out.dangling = dangling;
   out.unmatched = unmatched;
+  out.orphans = orphans;
   return out;
 }
 
@@ -507,8 +631,12 @@ function analyze() {
   var dg = all.dangling || [], un = all.unmatched || [];
   var parts = [];
   if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
-    return d.root + ' ' + d.dirs.map(function (x) { return DIRS[x]; }).join(' ');
+    return (isMuscle(d.root) ? MBY[d.root] : d.root) + ' ' + d.sides.map(function (x) { return SIDES[x]; }).concat(d.dirs.map(function (x) { return DIRS[x]; })).join(' ');
   }).join(' · '));
+  var orp = all.orphans || [];
+  if (orp.length) parts.push('תוצאה בלי שורש או שריר מזוהה (לא נקלטה): ' + orp.slice(0, 4).join(' · ') + (orp.length > 4 ? ' ועוד ' + (orp.length - 4) : ''));
+  var nos = found.filter(function (f) { return f.result === 'problem' && !f.side; }).length;
+  if (nos) parts.push('בעיה בלי צד (ימין / שמאל): ' + nos + '. היא תישמר בהערות השורה, צריך לסמן ידנית באפליקציה');
   if (un.length) parts.push('תשובת "תוקן / לא תוקן" שלא נמצאה לה בעיה מתאימה: ' + un.length);
   $('notice').hidden = !parts.length; $('notice').textContent = parts.join('. ');
   renderFound();
@@ -526,6 +654,8 @@ function renderFound() {
     pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : 'problem'), f.result === 'ok' ? 'תקין' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
     if (f.answer === 'notfixed') pills.appendChild(el('span', 'pill notfixed', 'לא תוקן'));
+    if (f.side) pills.appendChild(el('span', 'pill neutral', SIDES[f.side]));
+    else pills.appendChild(el('span', 'pill neutral', 'ללא צד'));
     if (f.dir) pills.appendChild(el('span', 'pill neutral', DIRS[f.dir]));
     if (!f.known) pills.appendChild(el('span', 'pill neutral', 'שורש לא בטבלה'));
     c.appendChild(pills);
@@ -553,7 +683,7 @@ $('send').onclick = function () {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
-      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '' };
+      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '' };
     })
   };
   var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';
@@ -562,7 +692,9 @@ $('send').onclick = function () {
     .then(function (j) {
       if (j && j.ok) {
         msg.className = 'sentmsg';
-        msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.';
+        msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.'
+          + (j.waiting > 0 ? ' השורות של הטיפול עוד לא הגיעו מהטאבלט לגיליון. הממצאים ייכנסו אליהן אוטומטית תוך כמה דקות, ואז לרענן את האפליקציה.'
+            : j.done > 0 ? ' הממצאים נכתבו לשורות הטיפול. לרענן את האפליקציה כדי לראות אותם.' : '');
         said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; lastPiece = ''; setAuto(''); found = [];
         $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true;
       } else {
