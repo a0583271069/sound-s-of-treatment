@@ -314,7 +314,8 @@ function generateRows_() {
 function tick() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) return;
-  try { generateRows_(); applyPending_(''); } finally { try { lock.releaseLock(); } catch (e) {} }
+  try { guard_('tick', function () { generateRows_(); applyPending_(''); }); }
+  finally { try { lock.releaseLock(); } catch (e) {} }
 }
 function applyPending() { tick(); } // old trigger name, kept so an old trigger still works
 
@@ -351,4 +352,91 @@ function installBackupTrigger() {
   });
   ScriptApp.newTrigger('weeklyBackup').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
   weeklyBackup(); // first backup right away, also asks for Drive permission
+}
+
+// ---- watchdog: a failure must never stay silent -----------------------------
+// One STATUS row per watched function, overwritten on every run, plus an e-mail
+// on the first failure. Without this a single bad character stops the whole
+// pipeline (no patients, no result rows, no dictation) and nothing says so.
+var STATUS_SHEET = 'STATUS';
+var STATUS_HEAD = ['what', 'when', 'state', 'message'];
+var ALERT_GAP_H = 6;   // at most one e-mail per this many hours for the same function
+var STALE_MIN = 30;    // tick is considered stuck after this many minutes without a run
+
+// writes the current state of one function; never throws
+function status_(name, ok, msg) {
+  try {
+    var sh = sheet_(STATUS_SHEET, STATUS_HEAD);
+    var last = sh.getLastRow(), row = 0;
+    if (last >= 2) {
+      var col = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (var i = 0; i < col.length; i++) if (String(col[i][0]).trim() === name) { row = i + 2; break; }
+    }
+    if (!row) row = Math.max(last, 1) + 1;
+    sh.getRange(row, 1, 1, 4).setValues([[name, stamp_(), ok ? 'OK' : 'ERROR', ok ? '' : String(msg).slice(0, 500)]]);
+  } catch (e) {}
+}
+
+// e-mails the owner, but not more often than ALERT_GAP_H for the same function; never throws
+function alert_(name, subject, body) {
+  try {
+    var p = PropertiesService.getScriptProperties(), k = 'alert_' + name;
+    var now = Date.now(), prev = Number(p.getProperty(k) || 0);
+    if (now - prev < ALERT_GAP_H * 3600000) return;
+    p.setProperty(k, String(now));
+    var to = Session.getEffectiveUser().getEmail();
+    if (to) MailApp.sendEmail(to, subject, body);
+  } catch (e) {}
+}
+
+// runs fn, records what happened, and shouts on a failure
+function guard_(name, fn) {
+  try {
+    fn();
+    try { PropertiesService.getScriptProperties().deleteProperty('alert_' + name); } catch (e) {}
+    status_(name, true, '');
+  } catch (err) {
+    var msg = (err && err.stack) ? err.stack : String(err);
+    status_(name, false, msg);
+    alert_(name, 'M.T.R.S.M. - a szkript hibara fut (' + name + ')',
+      'A hatterfeldolgozas hibara futott, ezert az app nem toltodik ki magatol.\n\n' +
+      'Fuggveny: ' + name + '\nIdo: ' + stamp_() + '\n\n' + msg +
+      '\n\nAz aktualis allapot a tablazat STATUS lapjan latszik.');
+    throw err; // stays visible in the execution log as well
+  }
+}
+
+// daily: notices if the 1-minute trigger stopped firing altogether
+function watchdog() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET);
+  var seen = '', state = '';
+  if (sh && sh.getLastRow() >= 2) {
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
+    for (var i = 0; i < v.length; i++) if (String(v[i][0]).trim() === 'tick') { seen = String(v[i][1]); state = String(v[i][2]); }
+  }
+  var t = seen ? parseStamp_(seen) : 0;
+  if (!t || Date.now() - t > STALE_MIN * 60000) {
+    alert_('watchdog', 'M.T.R.S.M. - a percenkenti feldolgozas all',
+      'A tick fuggveny utolso jelzese: ' + (seen || 'nincs') + ' (' + (state || '-') + ').\n' +
+      'Ennel regebbi, mint ' + STALE_MIN + ' perc, tehat a percenkenti aktivalo valoszinuleg leallt.\n' +
+      'Apps Script > Aktivalok, es futtasd ujra az installApplyTrigger fuggvenyt.');
+  }
+}
+
+// 'dd/MM/yyyy HH:mm:ss' back to milliseconds; 0 if it cannot be read
+function parseStamp_(s) {
+  var m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return 0;
+  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+}
+
+// RUN THIS ONCE by hand after pasting: creates the daily watchdog trigger and asks for the e-mail permission.
+function installWatchdog() {
+  ScriptApp.getProjectTriggers().forEach(function (tr) {
+    if (tr.getHandlerFunction() === 'watchdog') ScriptApp.deleteTrigger(tr);
+  });
+  ScriptApp.newTrigger('watchdog').timeBased().everyDays(1).atHour(7).create();
+  status_('tick', true, '');
+  alert_('install', 'M.T.R.S.M. - a hibaor bekapcsolt',
+    'Ez a proba-level azt jelzi, hogy a hibaor mukodik es tud levelet kuldeni.\nIdo: ' + stamp_());
 }
