@@ -8,7 +8,7 @@ var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
 var T_HEAD = ['received_at', 'updated_at', 'session_id', 'patient', 'lang', 'findings_count',
   'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2', 'treatment_id'];
-var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle', 'treatment_id', 'side', 'muscle_id', 'applied'];
+var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle', 'treatment_id', 'side', 'muscle_id', 'applied', 'how'];
 var BACKUP_FOLDER = 'גיבויי קליניקה';
 var BACKUP_KEEP = 8;
 
@@ -92,7 +92,7 @@ function doPost(e) {
       }
       if (fs.length) {
         var rows = fs.map(function (x) {
-          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || ''), String(x.muscle || ''), tid, String(x.side || ''), String(x.muscle_id || ''), ''];
+          return [now, session, patient, x.n, String(x.root), String(x.result), String(x.dir || ''), String(x.dirHe || ''), String(x.fixed || ''), String(x.phrase || ''), String(x.muscle || ''), tid, String(x.side || ''), String(x.muscle_id || ''), '', String(x.how || '')];
         });
         var fr = f.getLastRow() + 1;
         f.getRange(fr, 1, rows.length, F_HEAD.length).setNumberFormat('@');
@@ -156,10 +156,21 @@ function rowsOf_(name, keyCol, tid) {
 function neuroTargets_(root) { return root === 'L5' ? ['L5-EHL', 'L5-EHB'] : [root]; }
 
 // plan: {rowNo: {right:{res,fix}, left:{res,fix}, notes:[...]}}
-function plan_(plan, rowNo, side, res, fix, explicit) {
+function plan_(plan, rowNo, side, res, fix, explicit, how) {
   var p = plan[rowNo] || (plan[rowNo] = { notes: [] });
   if (!explicit && p[side]) return; // a vague "ok" never overrides something said about that side
-  p[side] = { res: res, fix: fix };
+  p[side] = { res: res, fix: fix, how: how || '' };
+}
+
+// what the muscle was fixed with: R1..R7 -> the names in the CORRECTIONS sheet (the same text the app offers)
+function correctionNames_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CORRECTIONS'), m = {};
+  if (!sh || sh.getLastRow() < 2) return m;
+  var idx = headIdx_(sh);
+  if (!idx.correction_id || !idx.name_he) return m;
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+  for (var i = 0; i < v.length; i++) m[String(v[i][idx.correction_id - 1]).trim()] = String(v[i][idx.name_he - 1]).trim();
+  return m;
 }
 
 function writePlan_(r, plan) {
@@ -171,6 +182,7 @@ function writePlan_(r, plan) {
       if (!p[sd]) return;
       if (idx['res_' + sd]) sh.getRange(row, idx['res_' + sd]).setValue(p[sd].res);
       if (idx['fix_' + sd]) sh.getRange(row, idx['fix_' + sd]).setValue(p[sd].fix);
+      if (idx['how_' + sd]) sh.getRange(row, idx['how_' + sd]).setValue(p[sd].how);
     });
     if (p.notes.length && idx.notes) {
       var cur = '';
@@ -194,7 +206,7 @@ function applyPending_(onlyTid) {
     if (onlyTid && tid !== onlyTid) continue;
     (byTid[tid] = byTid[tid] || []).push(i);
   }
-  var needN = countFilled_('NEURO_TESTS'), needM = countFilled_('MUSCLES');
+  var needN = countFilled_('NEURO_TESTS'), needM = countFilled_('MUSCLES'), CORR = correctionNames_();
   var total = { done: 0, waiting: 0 };
   Object.keys(byTid).forEach(function (tid) {
     var nr = rowsOf_('NEURO_RESULTS', 'test_id', tid), mr = rowsOf_('MUSCLE_RESULTS', 'muscle_id', tid);
@@ -210,11 +222,15 @@ function applyPending_(onlyTid) {
       if (isM ? !mReady : !nReady) { waiting++; return; }
       var res = result === 'ok' ? RES_OK : RES_BAD;
       var fix = res === RES_BAD ? (fixed === 'fixed' ? FIX_YES : fixed === 'notfixed' ? FIX_NO : '') : '';
+      var how = '';
+      if (isM && fix === FIX_YES) {
+        how = String(x[15] || '').split(',').map(function (id) { return CORR[id.trim()] || ''; }).filter(String).join(' , ');
+      }
       var keys = isM ? [mid] : neuroTargets_(root), rows = isM ? mr.map : nr.map, pl = isM ? mPlan : nPlan;
       keys.forEach(function (k) {
         var rr = rows[k];
         if (!rr) return;
-        if (side) plan_(pl, rr.row, side, res, fix, true);
+        if (side) plan_(pl, rr.row, side, res, fix, true, how);
         else if (res === RES_OK) { plan_(pl, rr.row, 'right', res, '', false); plan_(pl, rr.row, 'left', res, '', false); }
         else (pl[rr.row] || (pl[rr.row] = { notes: [] })).notes.push('⚠ הוכתב בלי צד: ' + phrase);
       });

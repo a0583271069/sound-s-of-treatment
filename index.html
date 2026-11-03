@@ -200,7 +200,7 @@ var SIDES = {right:'ימין', left:'שמאל'};
 // [muscle_id (as in the MUSCLES sheet), latin name, spoken Hebrew spellings separated by |].
 // Spellings only need to be close: words are compared by sound (see pkey / kmatch).
 var MDB = [
-  ['M01','gluteus medius','גלוטאוס מדיוס|גלוטיאוס מדיוס|גלוטאוס מדיאוס|גלוטאוס מדיום'],
+  ['M01','gluteus medius','גלוטאוס מדיוס|גלוטיאוס מדיוס|גלוטאוס מדיאוס|גלוטאוס מדיום|בלוטוס מדיוס|גלוטוס מדיוס|גלוטאוס|גלוטוס|בלוטוס'],
   ['M02','tensor fasciae latae','טנסור פשיה לטה|טנסור פאשיה לאטה|טנסור פשיה לאטה|טנסור|טי אף אל|tfl'],
   ['M03','iliopsoas (Psoas + Iliacus)','איליופסואס|אילאופסואס|איליאופסואס|איליופסואז|פסואס|פסואז|איליאקוס'],
   ['M04','quadriceps femoris','קוואדריספס|קוודריספס|קוואדריצפס|קוודריצפס|קוואדריספס פמוריס|קוודריספס פמוריס'],
@@ -218,7 +218,7 @@ var MDB = [
   ['M16','tibialis anterior','טיביאליס אנטריור|טיביאליס קדמי|טיביאליס אנטיריור|טיביאליס אנטרור|טיביאלוס אנטריור'],
   ['M17','fibularis (peroneus)','פרונאוס|פיברולריס|פיבולריס|פרוניאוס|פרוניאל|פרונאל|פרונאוס לונגוס'],
   ['M18','tibialis posterior','טיביאליס פוסטריור|טיביאליס אחורי|טיביאליס פוסטיריור|טיביאלוס פוסטריור'],
-  ['M19','gluteus maximus','גלוטאוס מקסימוס|גלוטאוס מכסימוס|גלוטיאוס מקסימוס|גלוטאוס מקסימום'],
+  ['M19','gluteus maximus','גלוטאוס מקסימוס|גלוטאוס מכסימוס|גלוטיאוס מקסימוס|גלוטאוס מקסימום|בלוטוס מקסימוס|גלוטוס מקסימוס'],
   ['M20','hamstrings','המסטרינג|המסטרינגס|המסטרינגז|המסטרינג'],
   ['M21','biceps femoris','ביספס פמוריס|ביצפס פמוריס|ביספס פמורוס|ביספס פמורס'],
   ['M22','semitendinosus / semimembranosus','סמיטנדינוזוס|סמיטנדינוסוס|סמימבראנוזוס|סמימברנוסוס|סמיטנדינוזוס סמימבראנוזוס|סמי טנדינוזוס'],
@@ -342,11 +342,41 @@ var FIXW = /^(?:תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
 var SIDER = /^ה?(?:ימין|ימנית)$/, SIDEL = /^ה?(?:שמאל|שמאלית)$/, SIDEBOTH = /^ה?צדדים$/;
 var SIDEHEAD = /^(?:ה?יד|ה?רגל|ב?צד)$/;
 
-function markLast(list, ans, key, unmatched) {
+// what the muscle was fixed with (the 7 reasons): "תוקן עצב", "תוקן NV ושיניים"
+var HOWHE = {R1:'עצב', R2:'מקור וחיבור', R3:'איבר', R4:'NV', R5:'NL', R6:'צלקות', R7:'שיניים'};
+var HOWCONN = /^(?:ו|עם|על|ידי|ב|באמצעות|דרך)$/;
+function howAt(toks, j) {
+  var w = toks[j] || '', n = toks[j + 1] || '';
+  if (/^ו?(?:אן|אנ|אין|n)$/i.test(w) && /^(?:וי|ווי|בי|v)$/i.test(n)) return { id: 'R4', n: 2 };
+  if (/^ו?(?:אן|אנ|אין|n)$/i.test(w) && /^(?:אל|l)$/i.test(n)) return { id: 'R5', n: 2 };
+  if (/^[וב]?(?:nv|אנוי|אנווי|אןוי)$/i.test(w)) return { id: 'R4', n: 1 };
+  if (/^[וב]?(?:nl|אנאל|אןאל)$/i.test(w)) return { id: 'R5', n: 1 };
+  if (/^[וב]?עצב(?:ים|וב)?$/.test(w)) return { id: 'R1', n: 1 };
+  if (/^[וב]?(?:מקור|חיבור|אחיזה)$/.test(w)) return { id: 'R2', n: (n === 'וחיבור' || n === 'חיבור') ? 2 : 1 };
+  if (/^[וב]?(?:איבר|אבר|איברים)$/.test(w)) return { id: 'R3', n: 1 };
+  if (/^[וב]?(?:צלק\S*|הצלקת)$/.test(w)) return { id: 'R6', n: 1 };
+  if (/^[וב]?(?:שיניים|שינים|שן|שיני)$/.test(w)) return { id: 'R7', n: 1 };
+  return null;
+}
+// the words after "תוקן": returns {ids, end} (end = index of the last word used)
+function howAfter(toks, i) {
+  var ids = [], j = i + 1, end = i;
+  while (j < toks.length) {
+    var k = j;
+    while (k < toks.length && HOWCONN.test(toks[k])) k++;
+    var hm = k < toks.length ? howAt(toks, k) : null;
+    if (!hm) break;
+    if (ids.indexOf(hm.id) < 0) ids.push(hm.id);
+    j = k + hm.n; end = j - 1;
+  }
+  return { ids: ids, end: end };
+}
+
+function markLast(list, ans, key, unmatched, how) {
   for (var i = list.length - 1; i >= 0; i--) {
     var f = list[i];
     if (f.result === 'problem' && !f.answer && (!key || f.key === key)) {
-      list.forEach(function (x) { if (x.g === f.g && !x.answer) x.answer = ans; });
+      list.forEach(function (x) { if (x.g === f.g && !x.answer) { x.answer = ans; if (how && how.length && x.muscle_id) x.how = how.slice(); } });
       return;
     }
   }
@@ -404,7 +434,7 @@ function parseMany(text) {
     var mm = findMuscle(toks, i);
     if (mm) { flush(); if (root && !isMuscle(root)) sticky = null; root = mm.id; rootAt = i; i += mm.n - 1; continue; } // the "hand/leg + side" header ends when the nerve block turns into the muscle block
     if (w === 'לא' && FIXW.test(nx)) { markLast(out, 'notfixed', root, unmatched); i++; continue; }
-    if (FIXW.test(w)) { markLast(out, 'fixed', root, unmatched); continue; }
+    if (FIXW.test(w)) { var hw = howAfter(toks, i); markLast(out, 'fixed', root, unmatched, hw.ids); i = hw.end; continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
     if (BADW.test(w)) { emit('problem', i); continue; }
     if (OKW.test(w)) { emit('ok', i); continue; }
@@ -654,6 +684,7 @@ function renderFound() {
     pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : 'problem'), f.result === 'ok' ? 'תקין' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
     if (f.answer === 'notfixed') pills.appendChild(el('span', 'pill notfixed', 'לא תוקן'));
+    (f.how || []).forEach(function (h) { pills.appendChild(el('span', 'pill fixed', HOWHE[h])); });
     if (f.side) pills.appendChild(el('span', 'pill neutral', SIDES[f.side]));
     else pills.appendChild(el('span', 'pill neutral', 'ללא צד'));
     if (f.dir) pills.appendChild(el('span', 'pill neutral', DIRS[f.dir]));
@@ -683,7 +714,7 @@ $('send').onclick = function () {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
-      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '' };
+      return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '', how: (f.how || []).join(',') };
     })
   };
   var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';
