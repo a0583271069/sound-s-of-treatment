@@ -382,7 +382,9 @@ function status_(name, ok, msg) {
       for (var i = 0; i < col.length; i++) if (String(col[i][0]).trim() === name) { row = i + 2; break; }
     }
     if (!row) row = Math.max(last, 1) + 1;
-    sh.getRange(row, 1, 1, 4).setValues([[name, stamp_(), ok ? 'OK' : 'ERROR', ok ? '' : String(msg).slice(0, 500)]]);
+    // plain text, or the Sheet turns the stamp into a date value and watchdog cannot read it back
+    sh.getRange(row, 1, 1, 4).setNumberFormat('@')
+      .setValues([[name, stamp_(), ok ? 'OK' : 'ERROR', ok ? '' : String(msg).slice(0, 500)]]);
   } catch (e) {}
 }
 
@@ -418,26 +420,33 @@ function guard_(name, fn) {
 // daily: notices if the 1-minute trigger stopped firing altogether
 function watchdog() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET);
-  var seen = '', state = '';
+  var seen = null, state = '';
   if (sh && sh.getLastRow() >= 2) {
     var v = sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
-    for (var i = 0; i < v.length; i++) if (String(v[i][0]).trim() === 'tick') { seen = String(v[i][1]); state = String(v[i][2]); }
+    for (var i = 0; i < v.length; i++) if (String(v[i][0]).trim() === 'tick') { seen = v[i][1]; state = String(v[i][2]); }
   }
-  var t = seen ? parseStamp_(seen) : 0;
+  var t = parseStamp_(seen);
   if (!t || Date.now() - t > STALE_MIN * 60000) {
+    var age = t ? Math.round((Date.now() - t) / 60000) + ' perc' : 'nem olvashato';
     alert_('watchdog', 'M.T.R.S.M. - a percenkenti feldolgozas all',
-      'A tick fuggveny utolso jelzese: ' + (seen || 'nincs') + ' (' + (state || '-') + ').\n' +
+      'A tick fuggveny utolso jelzese: ' + (seen ? stampOf_(t) : 'nincs') + ' (' + (state || '-') + '), kora: ' + age + '.\n' +
       'Ennel regebbi, mint ' + STALE_MIN + ' perc, tehat a percenkenti aktivalo valoszinuleg leallt.\n' +
       'Apps Script > Aktivalok, es futtasd ujra az installApplyTrigger fuggvenyt.');
   }
 }
 
-// 'dd/MM/yyyy HH:mm:ss' back to milliseconds; 0 if it cannot be read
+// the stamp back to milliseconds; 0 if it cannot be read. The cell may hold the
+// text 'dd/MM/yyyy HH:mm:ss' or, in an older sheet, a real date value.
 function parseStamp_(s) {
+  if (s == null || s === '') return 0;
+  if (Object.prototype.toString.call(s) === '[object Date]') return s.getTime();
   var m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
-  if (!m) return 0;
-  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+  var p = Date.parse(String(s));
+  return isNaN(p) ? 0 : p;
 }
+
+function stampOf_(ms) { return Utilities.formatDate(new Date(ms), TZ, 'dd/MM/yyyy HH:mm:ss'); }
 
 // RUN THIS ONCE by hand after pasting: creates the daily watchdog trigger and asks for the e-mail permission.
 function installWatchdog() {
