@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+<!-- always fetch the newest page: the app opens this in the browser and the browser
+     would otherwise serve its stored copy for a while after an update -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>הקלטת טיפול</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap">
 <style>
@@ -99,6 +102,7 @@ label.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted)
 .marks button.on-yes { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
 .marks button.on-no { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
 footer { color: var(--muted); font-size: 13px; }
+footer .ver { white-space: nowrap; opacity: .75; }
 @media (prefers-reduced-motion: no-preference) { .card { transition: border-color .2s; } }
 
 /* recorder additions */
@@ -184,7 +188,8 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <div id="msg" aria-live="polite"></div>
   <section class="list" id="list"></section>
 
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך.</footer>
+  <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 05/11/2026</span></footer>
 </div>
 
 <script>
