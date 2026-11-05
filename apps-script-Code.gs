@@ -319,11 +319,109 @@ function generateRows_() {
   return made;
 }
 
-// every minute: create the rows of new treatments, then finish findings that were waiting for rows
+// ---- the patient of a form answer, even if the form trigger failed ----------
+// The Google Form always writes its row. onFormSubmit then creates the patient in
+// PATIENTS - but if that trigger fails (a bad character in the code, a Google
+// server error), the answer is in the Sheet and the patient is nowhere, and
+// nothing says so. So every minute we also check it from here: any form answer
+// whose id is missing from PATIENTS gets its row now. A patient cannot be lost.
+function formSheet_() {
+  var out = null;
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (sh) {
+    if (out || sh.getLastColumn() < 2) return;
+    var h = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+      .map(function (x) { return String(x).trim(); });
+    if (h.indexOf('ת.ז') >= 0 && h.indexOf('שם מלא') >= 0) out = sh;
+  });
+  return out;
+}
+
+// returns how many patients were created now
+function backfillPatients_() {
+  var fsh = formSheet_();
+  if (!fsh || fsh.getLastRow() < 2) return 0;
+  var psh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PATIENTS');
+  if (!psh || psh.getLastRow() < 1) return 0;
+
+  var fh = fsh.getRange(1, 1, 1, fsh.getLastColumn()).getValues()[0]
+    .map(function (x) { return String(x).trim(); });
+  var fId = fh.indexOf('ת.ז'), fName = fh.indexOf('שם מלא'), fPhone = fh.indexOf('טלפון');
+  if (fId < 0) return 0;
+
+  var pd = psh.getDataRange().getValues();
+  var ph = pd[0].map(function (x) { return String(x).replace(/\s/g, ''); });
+  var cId = ph.indexOf('PATIENT_ID'), cName = ph.indexOf('PATIENT_NAME'),
+      cPhone = ph.indexOf('PHONE'), cFile = ph.indexOf('HEALTH_FILE'),
+      cCreated = ph.indexOf('CREATED_AT');
+  if (cId < 0) return 0;
+
+  // id column as plain text, so an identity number starting with 0 keeps its 0
+  psh.getRange(2, cId + 1, Math.max(psh.getMaxRows() - 1, 1), 1).setNumberFormat('@');
+
+  var have = {};
+  for (var i = 1; i < pd.length; i++) {
+    var k = String(pd[i][cId]).trim();
+    if (k) have[k] = true;
+  }
+
+  var fv = fsh.getRange(2, 1, fsh.getLastRow() - 1, fsh.getLastColumn()).getValues();
+  var width = psh.getLastColumn(), added = 0;
+  for (var j = 0; j < fv.length; j++) {
+    var id = String(fv[j][fId]).trim();
+    if (!id || have[id]) continue;
+    have[id] = true;
+    var row = new Array(width);
+    for (var c = 0; c < width; c++) row[c] = '';
+    row[cId] = id;
+    if (cName >= 0 && fName >= 0) row[cName] = String(fv[j][fName]).trim();
+    if (cPhone >= 0 && fPhone >= 0) row[cPhone] = fixPhone_(fv[j][fPhone]);
+    if (cFile >= 0) row[cFile] = 'uploaded';
+    if (cCreated >= 0) row[cCreated] = (fv[j][0] instanceof Date) ? fv[j][0] : new Date();
+    psh.appendRow(row);
+    added++;
+  }
+  return added;
+}
+
+// ---- every minute ------------------------------------------------------------
+// create the rows of new treatments, finish findings that were waiting for rows,
+// and pick up any patient the form trigger missed.
+// A minute trigger runs 1440 times a day and Google allows 90 minutes of trigger
+// time a day in total. Doing the full work every time would spend about three
+// times that and the triggers would be cut off for the rest of the day - the app
+// would simply stop, quietly. So a run that has nothing to do ends in a second:
+// it only compares the length of the sheets with what it saw last time. Every
+// tenth run does the full work anyway, so nothing can stay stuck.
+function idle_() {
+  var p = PropertiesService.getScriptProperties();
+  var n = Number(p.getProperty('TICK_N') || 0) + 1;
+  p.setProperty('TICK_N', String(n));
+  if (n % 10 === 0) return false;
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sig = [];
+  ['TREATMENTS', 'NEURO_RESULTS', 'MUSCLE_RESULTS', 'NEURO_TESTS', 'MUSCLES', 'FINDINGS', 'PATIENTS']
+    .forEach(function (name) {
+      var sh = ss.getSheetByName(name);
+      sig.push(sh ? sh.getLastRow() : 0);
+    });
+  var f = formSheet_();
+  sig.push(f ? f.getLastRow() : 0);
+  var now = sig.join('.');
+  if (now === p.getProperty('TICK_SIG')) return true;
+  p.setProperty('TICK_SIG', now);
+  return false;
+}
+
 function tick() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) return;
-  try { guard_('tick', function () { generateRows_(); applyPending_(''); }); }
+  try {
+    guard_('tick', function () {
+      if (idle_()) return;
+      backfillPatients_();
+      generateRows_();
+      applyPending_('');
+    });
+  }
   finally { try { lock.releaseLock(); } catch (e) {} }
 }
 function applyPending() { tick(); } // old trigger name, kept so an old trigger still works
