@@ -583,6 +583,13 @@ function parseMany(text) {
     else if (w === 'שמאלה') dirs.push('bendL');
   }
   flush();
+  // "ימין לא עובד" said with no name, then at once the same side + problem with a named muscle ("פירי פורמס ימין לא עובד"):
+  // the first was the start of that muscle (the recognizer dropped its name), not a finding of the nerve root before it
+  for (var q = out.length - 2; q >= 0; q--) {
+    var fa = out[q], fb = out[q + 1];
+    if (!isMuscle(fa.key) && isMuscle(fb.key) && fa.g !== fb.g && fa.result === 'problem' && fb.result === 'problem' &&
+        fa.side && fa.side === fb.side && !fa.dir && !fa.answer && !/[lcst]\d/i.test(fa.phrase)) out.splice(q, 1);
+  }
   out.dangling = dangling;
   out.unmatched = unmatched;
   out.orphans = orphans;
