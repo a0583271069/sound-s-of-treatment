@@ -430,6 +430,7 @@ function markHow(list, key, ids) {
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
   var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0;
+  var conflicts = [], numAt = -99, nameAt = -99;
   var unknown = [], hl = null, headLimb = null; // names that could not be resolved; "C" / "L" and "hand" / "leg" said by a header ("יד ימין")
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
   function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
@@ -528,10 +529,23 @@ function parseMany(text) {
       var lt = hl || (root && !isMuscle(root) && !isUnk(root) ? root.charAt(0) : null);
       if (lt && ROOTS.indexOf(lt + w) >= 0) { flush(); rootSet(lt + w); continue; }
     }
+    // a muscle NUMBER said aloud (the number in the MUSCLES list, "36 סטרנוקלידו"): it names the muscle by itself, and checks the name said next to it.
+    // Number first, name within 4 words and no result between: they must be the same muscle. Name first, number right after: same check.
+    if (/^\d{1,2}$/.test(w) && +w >= 1 && +w <= 56 && !NOTROOTNEXT.test(nx) && !NOTROOTPREV.test(pv) && MBY['M' + (w.length < 2 ? '0' : '') + w]) {
+      var nid = 'M' + (w.length < 2 ? '0' : '') + w;
+      if (isMuscle(root) && nameAt >= i - 4 && lastEmit < nameAt) {
+        if (root !== nid) conflicts.push({ num: +w, numId: nid, nameId: root });
+      } else {
+        flush(); if (root && !isMuscle(root)) sticky = null;
+        root = nid; rootAt = i; hl = null; numAt = i;
+      }
+      continue;
+    }
     var mm = findMuscle(toks, i);
     if (mm) {
+      if (isMuscle(root) && numAt >= i - 4 && lastEmit < numAt && root !== mm.id && !isUnk(mm.id)) conflicts.push({ num: +root.slice(1), numId: root, nameId: mm.id }); // the name wins
       flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
-      root = mm.id; rootAt = i; hl = null;
+      root = mm.id; rootAt = i; hl = null; nameAt = i;
       if (isUnk(mm.id)) unknown.push(toks.slice(i, i + mm.n).join(' '));
       i += mm.n - 1; continue;
     }
@@ -594,6 +608,7 @@ function parseMany(text) {
   out.unmatched = unmatched;
   out.orphans = orphans;
   out.unknown = unknown;
+  out.conflicts = conflicts;
   return out;
 }
 
@@ -832,6 +847,9 @@ function analyze() {
   }).join(' · '));
   var orp = all.orphans || [];
   if (orp.length) parts.push('תוצאה בלי שורש או שריר מזוהה (לא נקלטה): ' + orp.slice(0, 4).join(' · ') + (orp.length > 4 ? ' ועוד ' + (orp.length - 4) : ''));
+  (all.conflicts || []).forEach(function (c) {
+    parts.push('המספר ' + c.num + ' (' + MBY[c.numId] + ') לא תואם לשם ששמעתי (' + (MBY[c.nameId] || c.nameId) + '). נשמר לפי השם, כדאי לבדוק');
+  });
   var nos = found.filter(function (f) { return f.result === 'problem' && !f.side; }).length;
   if (nos) parts.push('בעיה בלי צד (ימין / שמאל): ' + nos + '. היא תישמר בהערות השורה, צריך לסמן ידנית באפליקציה');
   if (un.length) parts.push('תשובת "תוקן / לא תוקן" שלא נמצאה לה בעיה מתאימה: ' + un.length);
