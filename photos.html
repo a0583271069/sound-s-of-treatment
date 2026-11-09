@@ -22,6 +22,8 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 .row { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; align-items:center; }
 .note { color:var(--muted); font-size:14px; margin:6px 0; }
 .err { color:var(--bad); }
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:4px 0 10px; }
+.pair canvas { width:100%; height:auto; border-radius:6px; display:block; }
 .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
 .cell { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:4px; text-align:center; min-height:60px; }
 .cell img { width:100%; height:auto; display:block; border-radius:6px; }
@@ -38,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 17:35</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 18:00</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -60,8 +62,10 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
       <label>טיפול ב׳ <select id="tB"></select></label>
       <select id="sB"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
     </div>
-    <div class="cap" id="capA"></div><div class="grid" id="gA"></div>
-    <div class="cap" id="capB"></div><div class="grid" id="gB"></div>
+    <div class="row tg" id="toggles2"></div>
+    <div class="row"><button id="cmpLinesBtn" type="button">הצג קווים בהשוואה</button><span id="cmpNote" class="note"></span></div>
+    <div class="cap" id="capA"></div><div class="cap" id="capB"></div>
+    <div id="pairs"></div>
   </section>
 
   <section id="pose" hidden>
@@ -135,23 +139,50 @@ async function load() {
     status('');
   } catch (e) { status('אין חיבור לסקריפט', true); }
 }
-async function drawSet(gridId, capId, tid, set) {
-  const g = $(gridId); g.textContent = '';
-  const t = tOf(tid); if (!t) { $(capId).textContent = ''; return; }
-  $(capId).textContent = 'טיפול ' + t.TREATMENT_NUMBER + ' · ' + (set === 'PHOTO' ? 'לפני' : 'אחרי') + (t.DATE ? ' · ' + t.DATE : '');
+const cmpCells = [];
+let cmpLines = false;
+const poseCache = {}, imgCache = {};
+function capOf(tid, set) { const t = tOf(tid); return t ? 'טיפול ' + t.TREATMENT_NUMBER + ' · ' + (set === 'PHOTO' ? 'לפני' : 'אחרי') + (t.DATE ? ' · ' + t.DATE : '') : ''; }
+async function drawCmp() {
+  const box = $('pairs'); box.textContent = ''; cmpCells.length = 0;
+  const A = tOf($('tA').value), B = tOf($('tB').value);
+  $('capA').textContent = A ? 'א׳ (ימין בכל זוג): ' + capOf(A.Treatment_ID, $('sA').value) : '';
+  $('capB').textContent = B ? 'ב׳ (שמאל בכל זוג): ' + capOf(B.Treatment_ID, $('sB').value) : '';
   for (const v of VIEWS) {
-    const c = document.createElement('div'); c.className = 'cell'; c.textContent = '…'; g.appendChild(c);
-    const path = t[set + '_' + v];
-    getPhoto(path).then((src) => {
-      c.textContent = '';
-      if (!src) { c.textContent = VHE[v] + ': אין תמונה'; return; }
-      const im = document.createElement('img'); im.src = src; c.appendChild(im);
-      const s = document.createElement('small'); s.textContent = VHE[v]; c.appendChild(s);
+    const lab = document.createElement('div'); lab.className = 'cap'; lab.textContent = VHE[v]; box.appendChild(lab);
+    const row = document.createElement('div'); row.className = 'pair'; box.appendChild(row);
+    [[A, $('sA').value], [B, $('sB').value]].forEach(([t, set]) => {
+      const c = document.createElement('div'); c.className = 'cell'; c.textContent = '…'; row.appendChild(c);
+      const path = t ? t[set + '_' + v] : '';
+      getPhoto(path).then(async (src) => {
+        if (!src) { c.textContent = 'אין תמונה'; return; }
+        const im = imgCache[path] || (imgCache[path] = await loadImg(src));
+        const cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+        c.textContent = ''; c.appendChild(cv);
+        const cell = { cv, im, view: v, path, lm: poseCache[path] || null };
+        cmpCells.push(cell); paintCell(cell);
+      });
     });
   }
 }
-function drawCmp() { drawSet('gA', 'capA', $('tA').value, $('sA').value); drawSet('gB', 'capB', $('tB').value, $('sB').value); }
-
+function paintCell(c) { paint(c.cv, c.im, cmpLines ? c.lm : null, c.view, false); }
+function repaintCmp() { cmpCells.forEach(paintCell); }
+async function cmpAnalyse() {
+  cmpLines = !cmpLines; $('cmpLinesBtn').className = cmpLines ? 'on' : '';
+  if (!cmpLines) { repaintCmp(); $('cmpNote').textContent = ''; return; }
+  $('cmpNote').textContent = 'מנתח…';
+  try {
+    const m = await ensureModel();
+    for (const c of cmpCells) {
+      if (!poseCache[c.path]) {
+        const res = m.detect(c.im);
+        poseCache[c.path] = res.landmarks && res.landmarks[0] ? res.landmarks[0].map((q) => ({ x: q.x * c.cv.width, y: q.y * c.cv.height, v: q.visibility })) : null;
+      }
+      c.lm = poseCache[c.path]; paintCell(c);
+    }
+    $('cmpNote').textContent = 'הקווים לפי זיהוי אוטומטי. לתיקון נקודות: לשונית "ניתוח יציבה".';
+  } catch (e) { $('cmpNote').textContent = 'המודל לא נטען (אין אינטרנט?).'; cmpLines = false; $('cmpLinesBtn').className = ''; }
+}
 // ---- posture analysis ----
 let landmarker = null, img = null, lm = null, manual = [], manualMode = false, editMode = false, dragI = -1;
 const EDIT = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
@@ -162,14 +193,17 @@ const LINES = [
 ];
 const on = {}; LINES.forEach((l) => (on[l[0]] = true));
 function buildToggles() {
-  const box = $('toggles'); box.textContent = '';
+  ['toggles', 'toggles2'].forEach(buildOne);
+}
+function buildOne(id) {
+  const box = $(id); box.textContent = '';
   const all = document.createElement('button'); all.type = 'button'; all.textContent = 'הכל'; all.className = 'on';
-  all.onclick = () => { const v = !LINES.every((l) => on[l[0]]); LINES.forEach((l) => (on[l[0]] = v)); buildToggles(); render(); };
+  all.onclick = () => { const v = !LINES.every((l) => on[l[0]]); LINES.forEach((l) => (on[l[0]] = v)); buildToggles(); render(); repaintCmp(); };
   box.appendChild(all);
   LINES.forEach(([k, t, col]) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = on[k] ? 'on' : '';
     b.innerHTML = '<span class="sw" style="background:' + col + '"></span>' + t;
-    b.onclick = () => { on[k] = !on[k]; b.className = on[k] ? 'on' : ''; render(); };
+    b.onclick = () => { on[k] = !on[k]; buildToggles(); render(); repaintCmp(); };
     box.appendChild(b);
   });
 }
@@ -208,10 +242,9 @@ function angle3(a, b, c) {
   const d = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
   return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
 }
-function render() {
-  if (!img) return;
-  const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height, lw = Math.max(2, W / 400);
-  g.clearRect(0, 0, W, H); g.drawImage(img, 0, 0);
+function paint(cv, im, lm, view0, isMain) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, lw = Math.max(2, W / 400);
+  g.clearRect(0, 0, W, H); g.drawImage(im, 0, 0);
   const col = Object.fromEntries(LINES.map((l) => [l[0], l[2]]));
   const out = [];
   function seg(p, q, k, ext) {
@@ -223,7 +256,7 @@ function render() {
   function dot(p, c) { g.fillStyle = c; g.beginPath(); g.arc(p.x, p.y, lw * 2, 0, 7); g.fill(); }
   const warn = [];
   if (lm) {
-    const view = $('pV').value, side = view === 'LEFT' || view === 'RIGHT';
+    const view = view0, side = view === 'LEFT' || view === 'RIGHT';
     const L = (i) => lm[i];
     const sh = mid(L(11), L(12)), hp = mid(L(23), L(24)), kn = mid(L(25), L(26)), an = mid(L(27), L(28));
     const earM = mid(L(7), L(8)), eyeM = view === 'BACK' ? earM : mid(L(2), L(5));
@@ -267,15 +300,21 @@ function render() {
       if (on.eyes && good(eye, E)) seg(eye, E, 'eyes', true);
     }
     if (warn.length) out.push('<span class="err">לא מספיק ברור בתמונה (לא צויר): ' + warn.join(', ') + '. אפשר לתקן בעריכת נקודות.</span>');
-    if (editMode) {
+    if (isMain && editMode) {
       EDIT.forEach((i) => { const q = L(i); g.lineWidth = lw; g.strokeStyle = good(q) ? '#ffffff' : '#ff1744'; g.fillStyle = 'rgba(255,214,0,.35)'; g.beginPath(); g.arc(q.x, q.y, lw * 5, 0, 7); g.fill(); g.stroke(); });
     }
   }
-  if (manual.length) {
+  if (isMain && manual.length) {
     manual.forEach((p) => dot(p, '#ffd600'));
     if (manual.length === 2) { seg(manual[0], manual[1], 'hips', false); out.push('<b>הטיית אגן (ידני)</b> ' + tilt(manual[0], manual[1]).toFixed(1) + '° מהאופקי'); }
   }
+  return out;
+}
+function render() {
+  if (!img) return;
+  const out = paint($('cv'), img, lm, $('pV').value, true);
   $('readout').innerHTML = out.map((x) => '<div>' + x + '</div>').join('');
+  repaintCmp();
 }
 $('cv').addEventListener('click', (e) => {
   if (!manualMode || !img || editMode) return;
@@ -301,6 +340,7 @@ $('run').onclick = run;
 $('pat').onchange = fillTreatments;
 ['tA', 'tB', 'sA', 'sB'].forEach((i) => ($(i).onchange = drawCmp));
 $('reload').onclick = load;
+$('cmpLinesBtn').onclick = cmpAnalyse;
 $('cfgSave').onclick = () => { cfg = { url: $('cfgUrl').value.trim(), pw: $('cfgPw').value }; lsSet(CFG, JSON.stringify(cfg)); load(); };
 function tab(p) { $('cmp').hidden = p; $('pose').hidden = !p; $('tabCmp').className = p ? '' : 'on'; $('tabPose').className = p ? 'on' : ''; }
 $('tabCmp').onclick = () => tab(false); $('tabPose').onclick = () => tab(true);
