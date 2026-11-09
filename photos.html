@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<title>תמונות והשוואה</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap">
+<style>
+:root { --bg:#f4f6f5; --surface:#fff; --fg:#17211b; --muted:#5b6a61; --line:#d5ddd8; --accent:#1d6b4f; --bad:#b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#121714; --surface:#1b231e; --fg:#e8efe9; --muted:#9db0a4; --line:#32413a; --accent:#6fd4a4; --bad:#ff8d84; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:Heebo,system-ui,sans-serif; font-size:16px; }
+main { max-width:1100px; margin:0 auto; padding:12px 16px 40px; }
+h1 { font-size:20px; margin:8px 0; }
+.tabs { display:flex; gap:8px; margin:8px 0 12px; }
+button, select, input { font:inherit; color:inherit; }
+button { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; min-height:40px; }
+button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+select, input { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:8px; min-height:40px; max-width:100%; }
+.row { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; align-items:center; }
+.note { color:var(--muted); font-size:14px; margin:6px 0; }
+.err { color:var(--bad); }
+.grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.cell { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:4px; text-align:center; min-height:60px; }
+.cell img { width:100%; height:auto; display:block; border-radius:6px; }
+.cell small { color:var(--muted); display:block; }
+.cap { font-weight:700; margin:12px 0 4px; }
+#cv { max-width:100%; height:auto; background:#000; border-radius:8px; touch-action:manipulation; }
+.tg button { min-height:34px; padding:4px 10px; font-size:14px; }
+.sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-inline-end:4px; vertical-align:middle; }
+#readout { font-size:14px; line-height:1.7; }
+[hidden] { display:none !important; }
+@media (max-width:700px) { .grid { grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>תמונות והשוואה</h1>
+  <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
+  <div class="row" id="cfgRow" hidden>
+    <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
+  </div>
+  <div class="row">
+    <select id="pat"></select>
+    <button id="reload" type="button">רענן רשימה</button>
+    <span id="status" class="note"></span>
+  </div>
+  <div class="tabs">
+    <button id="tabCmp" class="on" type="button">השוואה</button>
+    <button id="tabPose" type="button">ניתוח יציבה</button>
+  </div>
+
+  <section id="cmp">
+    <div class="row">
+      <label>טיפול א׳ <select id="tA"></select></label>
+      <select id="sA"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
+      <label>טיפול ב׳ <select id="tB"></select></label>
+      <select id="sB"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
+    </div>
+    <div class="cap" id="capA"></div><div class="grid" id="gA"></div>
+    <div class="cap" id="capB"></div><div class="grid" id="gB"></div>
+  </section>
+
+  <section id="pose" hidden>
+    <div class="row">
+      <select id="pT"></select>
+      <select id="pS"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
+      <select id="pV"><option value="FRONT">מלפנים</option><option value="LEFT">שמאל</option><option value="BACK">מאחור</option><option value="RIGHT">ימין</option></select>
+      <button id="run" type="button">נתח</button>
+    </div>
+    <div class="row tg" id="toggles"></div>
+    <canvas id="cv"></canvas>
+    <p class="note" id="pnote"></p>
+    <div id="readout"></div>
+    <div class="row"><button id="pelvis" type="button">סימון ידני: הטיית אגן (2 נקודות)</button><button id="clearMan" type="button">נקה סימון</button></div>
+    <p class="note">ראש הראש, עצם החזה והטבור הם הערכה לפי נקודות הגוף. קימור גב תחתון / עליון והטיית אגן לא ניתנים לזיהוי אוטומטי אמין מתמונה בלבוש, לכן אלה בסימון ידני. הכלי הוא עזר לעין ולא אבחנה.</p>
+  </section>
+</main>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+const $ = (id) => document.getElementById(id);
+const CFG = 'clinic-settings-v1';
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+let cfg = {}; try { cfg = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
+let data = { treatments: [], names: {} };
+const photoCache = {};
+const VIEWS = ['FRONT', 'LEFT', 'BACK', 'RIGHT'], VHE = { FRONT: 'מלפנים', LEFT: 'שמאל', BACK: 'מאחור', RIGHT: 'ימין' };
+
+function status(t, bad) { $('status').textContent = t || ''; $('status').className = 'note' + (bad ? ' err' : ''); }
+async function call(body) {
+  const r = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ pw: cfg.pw }, body)) });
+  return r.json();
+}
+async function getPhoto(path) {
+  if (!path) return null;
+  if (photoCache[path]) return photoCache[path];
+  const j = await call({ action: 'photo', file: path });
+  if (!j || !j.ok) return null;
+  return (photoCache[path] = 'data:' + j.mime + ';base64,' + j.data);
+}
+function opt(sel, items, keep) {
+  const cur = keep ? sel.value : '';
+  sel.textContent = '';
+  items.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+  if (cur && items.some((x) => x[0] === cur)) sel.value = cur;
+}
+function tOf(id) { return data.treatments.find((x) => x.Treatment_ID === id); }
+function fillTreatments() {
+  const pid = $('pat').value;
+  const ts = data.treatments.filter((x) => x.PATIENT_ID === pid).sort((a, b) => Number(a.TREATMENT_NUMBER) - Number(b.TREATMENT_NUMBER));
+  const items = ts.map((x) => [x.Treatment_ID, 'טיפול ' + x.TREATMENT_NUMBER + (x.DATE ? ' · ' + x.DATE : '')]);
+  ['tA', 'tB', 'pT'].forEach((s) => opt($(s), items, true));
+  if (items.length > 1 && $('tA').value === $('tB').value) $('tB').value = items[items.length - 1][0];
+  drawCmp();
+}
+async function load() {
+  if (!cfg.url || !cfg.pw) { $('cfgRow').hidden = false; status('חסרים כתובת וסיסמה', true); return; }
+  $('cfgRow').hidden = true; status('טוען רשימה…');
+  try {
+    const j = await call({ action: 'list' });
+    if (!j || !j.ok) { status(j && j.error ? j.error : 'שגיאה', true); return; }
+    data = { treatments: j.treatments || [], names: j.names || {} };
+    const pids = [...new Set(data.treatments.map((x) => x.PATIENT_ID))];
+    opt($('pat'), pids.map((p) => [p, p + (data.names[p] ? ' · ' + data.names[p] : '')]), true);
+    const q = new URLSearchParams(location.search), qp = q.get('patient');
+    if (qp && pids.includes(qp)) $('pat').value = qp;
+    fillTreatments();
+    const qt = q.get('t');
+    if (qt && tOf(qt)) { $('pat').value = tOf(qt).PATIENT_ID; fillTreatments(); $('tB').value = qt; $('pT').value = qt; drawCmp(); }
+    status('');
+  } catch (e) { status('אין חיבור לסקריפט', true); }
+}
+async function drawSet(gridId, capId, tid, set) {
+  const g = $(gridId); g.textContent = '';
+  const t = tOf(tid); if (!t) { $(capId).textContent = ''; return; }
+  $(capId).textContent = 'טיפול ' + t.TREATMENT_NUMBER + ' · ' + (set === 'PHOTO' ? 'לפני' : 'אחרי') + (t.DATE ? ' · ' + t.DATE : '');
+  for (const v of VIEWS) {
+    const c = document.createElement('div'); c.className = 'cell'; c.textContent = '…'; g.appendChild(c);
+    const path = t[set + '_' + v];
+    getPhoto(path).then((src) => {
+      c.textContent = '';
+      if (!src) { c.textContent = VHE[v] + ': אין תמונה'; return; }
+      const im = document.createElement('img'); im.src = src; c.appendChild(im);
+      const s = document.createElement('small'); s.textContent = VHE[v]; c.appendChild(s);
+    });
+  }
+}
+function drawCmp() { drawSet('gA', 'capA', $('tA').value, $('sA').value); drawSet('gB', 'capB', $('tB').value, $('sB').value); }
+
+// ---- posture analysis ----
+let landmarker = null, img = null, lm = null, manual = [], manualMode = false;
+const LINES = [
+  ['axis', 'ציר גוף (זיגזג)', '#e53935'], ['plumb', 'אנך', '#1e88e5'],
+  ['eyes', 'עיניים', '#8e24aa'], ['shoulders', 'כתפיים', '#fb8c00'], ['elbows', 'מרפקים', '#43a047'],
+  ['hips', 'אגן', '#00acc1'], ['knees', 'ברכיים', '#f4511e'], ['ankles', 'קרסוליים', '#6d4c41'],
+];
+const on = {}; LINES.forEach((l) => (on[l[0]] = true));
+function buildToggles() {
+  const box = $('toggles'); box.textContent = '';
+  const all = document.createElement('button'); all.type = 'button'; all.textContent = 'הכל'; all.className = 'on';
+  all.onclick = () => { const v = !LINES.every((l) => on[l[0]]); LINES.forEach((l) => (on[l[0]] = v)); buildToggles(); render(); };
+  box.appendChild(all);
+  LINES.forEach(([k, t, col]) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = on[k] ? 'on' : '';
+    b.innerHTML = '<span class="sw" style="background:' + col + '"></span>' + t;
+    b.onclick = () => { on[k] = !on[k]; b.className = on[k] ? 'on' : ''; render(); };
+    box.appendChild(b);
+  });
+}
+async function ensureModel() {
+  if (landmarker) return landmarker;
+  $('pnote').textContent = 'טוען מודל זיהוי (פעם ראשונה, כמה שניות)…';
+  const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  landmarker = await PoseLandmarker.createFromOptions(fs, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task' },
+    runningMode: 'IMAGE', numPoses: 1,
+  });
+  return landmarker;
+}
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+async function run() {
+  const t = tOf($('pT').value); if (!t) return;
+  $('pnote').textContent = 'טוען תמונה…'; lm = null; manual = [];
+  const src = await getPhoto(t[$('pS').value + '_' + $('pV').value]);
+  if (!src) { $('pnote').textContent = 'אין תמונה לבחירה הזו.'; return; }
+  img = await loadImg(src);
+  const cv = $('cv'); cv.width = img.naturalWidth; cv.height = img.naturalHeight; cv.getContext('2d').drawImage(img, 0, 0);
+  try {
+    const m = await ensureModel();
+    const res = m.detect(cv);
+    lm = res.landmarks && res.landmarks[0] ? res.landmarks[0].map((p) => ({ x: p.x * cv.width, y: p.y * cv.height, v: p.visibility })) : null;
+    $('pnote').textContent = lm ? '' : 'לא זוהה גוף בתמונה. אפשר לצלם מרחוק יותר, עם כל הגוף בפריים.';
+  } catch (e) { $('pnote').textContent = 'המודל לא נטען (אין אינטרנט?). התמונה מוצגת, אפשר לסמן ידנית.'; }
+  render();
+}
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const ang = (a, b) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+function tilt(a, b) { let d = ang(a, b); if (d > 90) d -= 180; if (d < -90) d += 180; return d; }
+function angle3(a, b, c) {
+  const v1 = { x: a.x - b.x, y: a.y - b.y }, v2 = { x: c.x - b.x, y: c.y - b.y };
+  const d = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
+  return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
+}
+function render() {
+  if (!img) return;
+  const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height, lw = Math.max(2, W / 400);
+  g.clearRect(0, 0, W, H); g.drawImage(img, 0, 0);
+  const col = Object.fromEntries(LINES.map((l) => [l[0], l[2]]));
+  const out = [];
+  function seg(p, q, k, ext) {
+    g.strokeStyle = col[k]; g.lineWidth = lw; g.beginPath();
+    if (ext) { const dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1, e = W; g.moveTo(p.x - (dx / L) * e, p.y - (dy / L) * e); g.lineTo(q.x + (dx / L) * e, q.y + (dy / L) * e); }
+    else { g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); }
+    g.stroke();
+  }
+  function dot(p, c) { g.fillStyle = c; g.beginPath(); g.arc(p.x, p.y, lw * 2, 0, 7); g.fill(); }
+  if (lm) {
+    const side = $('pV').value === 'LEFT' || $('pV').value === 'RIGHT';
+    const L = (i) => lm[i];
+    const sh = mid(L(11), L(12)), hp = mid(L(23), L(24)), kn = mid(L(25), L(26)), an = mid(L(27), L(28));
+    const earM = mid(L(7), L(8)), eyeM = mid(L(2), L(5));
+    const up = { x: sh.x - hp.x, y: sh.y - hp.y }, ul = Math.hypot(up.x, up.y) || 1;
+    const headTop = { x: earM.x + (up.x / ul) * (ul * 0.42), y: earM.y + (up.y / ul) * (ul * 0.42) };
+    const sternum = { x: sh.x + (hp.x - sh.x) * 0.22, y: sh.y + (hp.y - sh.y) * 0.22 };
+    const navel = { x: sh.x + (hp.x - sh.x) * 0.62, y: sh.y + (hp.y - sh.y) * 0.62 };
+    const floor = { x: an.x, y: Math.max(L(29).y, L(30).y, L(31).y, L(32).y, an.y) };
+    // plumb line through the ankles (front/back: between them; side: the visible one)
+    const sideIdx = side ? (L(27).v >= L(28).v ? [27, 25, 23, 11, 7] : [28, 26, 24, 12, 8]) : null;
+    const px = side ? L(sideIdx[0]).x : an.x;
+    if (on.axis) {
+      const pts = side ? [headTop, L(sideIdx[4]), L(sideIdx[3]), L(sideIdx[2]), L(sideIdx[1]), L(sideIdx[0]), floor] : [headTop, eyeM, sh, sternum, navel, hp, kn, an, floor];
+      g.strokeStyle = col.axis; g.lineWidth = lw; g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y))); g.stroke(); pts.forEach((p) => dot(p, col.axis));
+    }
+    if (on.plumb) { g.strokeStyle = col.plumb; g.lineWidth = lw; g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); g.setLineDash([]); }
+    const pair = (k, a, b, label) => { if (!on[k]) return; seg(a, b, k, true); };
+    if (!side) {
+      pair('eyes', L(2), L(5)); pair('shoulders', L(11), L(12)); pair('elbows', L(13), L(14)); pair('hips', L(23), L(24)); pair('knees', L(25), L(26)); pair('ankles', L(27), L(28));
+      const t2 = (a, b) => tilt(L(a), L(b)).toFixed(1) + '°';
+      out.push('<b>הטיות מהאופקי</b> (מעלות, לפי כיוון התמונה): עיניים ' + t2(2, 5) + ' · כתפיים ' + t2(11, 12) + ' · מרפקים ' + t2(13, 14) + ' · אגן ' + t2(23, 24) + ' · ברכיים ' + t2(25, 26) + ' · קרסוליים ' + t2(27, 28));
+      const hh = Math.abs(floor.y - headTop.y) || 1;
+      out.push('<b>סטייה מהאנך</b> (באחוזי גובה גוף): ראש ' + (((earM.x - px) / hh) * 100).toFixed(1) + '% · כתפיים ' + (((sh.x - px) / hh) * 100).toFixed(1) + '% · אגן ' + (((hp.x - px) / hh) * 100).toFixed(1) + '% · ברכיים ' + (((kn.x - px) / hh) * 100).toFixed(1) + '%');
+    } else {
+      const [A, K, Hp, S, E] = sideIdx.map((i) => L(i)); const el = side ? L(sideIdx[3] + 2) : null, wr = L(sideIdx[3] + 4);
+      const hh = Math.abs(floor.y - headTop.y) || 1, d = (p) => (((p.x - px) / hh) * 100).toFixed(1) + '%';
+      out.push('<b>מיקום ביחס לאנך</b> (באחוזי גובה גוף, חיובי = ימינה בתמונה): אוזן ' + d(E) + ' · כתף ' + d(S) + ' · אגן ' + d(Hp) + ' · ברך ' + d(K));
+      out.push('<b>זווית מרפק</b> ' + angle3(S, el, wr).toFixed(0) + '° · <b>זווית ברך</b> ' + angle3(Hp, K, A).toFixed(0) + '° · <b>הטיית ראש</b> (עין-אוזן) ' + tilt(L(sideIdx[4] === 7 ? 2 : 5), E).toFixed(1) + '°');
+      if (on.knees) { seg({ x: K.x - W / 6, y: K.y }, { x: K.x + W / 6, y: K.y }, 'knees', false); }
+      if (on.hips) { seg({ x: Hp.x - W / 6, y: Hp.y }, { x: Hp.x + W / 6, y: Hp.y }, 'hips', false); }
+      if (on.shoulders) { seg({ x: S.x - W / 6, y: S.y }, { x: S.x + W / 6, y: S.y }, 'shoulders', false); }
+      if (on.elbows) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); }
+      if (on.eyes) { seg(L(sideIdx[4] === 7 ? 2 : 5), E, 'eyes', true); }
+      if (on.ankles) { seg({ x: A.x - W / 6, y: A.y }, { x: A.x + W / 6, y: A.y }, 'ankles', false); }
+    }
+  }
+  if (manual.length) {
+    manual.forEach((p) => dot(p, '#ffd600'));
+    if (manual.length === 2) { seg(manual[0], manual[1], 'hips', false); out.push('<b>הטיית אגן (ידני)</b> ' + tilt(manual[0], manual[1]).toFixed(1) + '° מהאופקי'); }
+  }
+  $('readout').innerHTML = out.map((x) => '<div>' + x + '</div>').join('');
+}
+$('cv').addEventListener('click', (e) => {
+  if (!manualMode || !img) return;
+  const cv = $('cv'), r = cv.getBoundingClientRect();
+  manual.push({ x: ((e.clientX - r.left) / r.width) * cv.width, y: ((e.clientY - r.top) / r.height) * cv.height });
+  if (manual.length >= 2) manualMode = false;
+  render();
+});
+$('pelvis').onclick = () => { manual = []; manualMode = true; $('pnote').textContent = 'לחץ על שתי נקודות באגן (למשל קדמית ואחורית) בתמונה.'; render(); };
+$('clearMan').onclick = () => { manual = []; manualMode = false; $('pnote').textContent = ''; render(); };
+$('run').onclick = run;
+
+$('pat').onchange = fillTreatments;
+['tA', 'tB', 'sA', 'sB'].forEach((i) => ($(i).onchange = drawCmp));
+$('reload').onclick = load;
+$('cfgSave').onclick = () => { cfg = { url: $('cfgUrl').value.trim(), pw: $('cfgPw').value }; lsSet(CFG, JSON.stringify(cfg)); load(); };
+function tab(p) { $('cmp').hidden = p; $('pose').hidden = !p; $('tabCmp').className = p ? '' : 'on'; $('tabPose').className = p ? 'on' : ''; }
+$('tabCmp').onclick = () => tab(false); $('tabPose').onclick = () => tab(true);
+buildToggles();
+load();
+</script>
+</body>
+</html>
