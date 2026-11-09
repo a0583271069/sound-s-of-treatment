@@ -27,6 +27,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 .cell img { width:100%; height:auto; display:block; border-radius:6px; }
 .cell small { color:var(--muted); display:block; }
 .cap { font-weight:700; margin:12px 0 4px; }
+#cv.editing { touch-action:none; cursor:grab; }
 #cv { max-width:100%; height:auto; background:#000; border-radius:8px; touch-action:manipulation; }
 .tg button { min-height:34px; padding:4px 10px; font-size:14px; }
 .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-inline-end:4px; vertical-align:middle; }
@@ -74,7 +75,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
     <canvas id="cv"></canvas>
     <p class="note" id="pnote"></p>
     <div id="readout"></div>
-    <div class="row"><button id="pelvis" type="button">סימון ידני: הטיית אגן (2 נקודות)</button><button id="clearMan" type="button">נקה סימון</button></div>
+    <div class="row"><button id="edit" type="button">עריכת נקודות (גרירה)</button><button id="pelvis" type="button">סימון ידני: הטיית אגן (2 נקודות)</button><button id="clearMan" type="button">נקה סימון</button></div>
     <p class="note">ראש הראש, עצם החזה והטבור הם הערכה לפי נקודות הגוף. קימור גב תחתון / עליון והטיית אגן לא ניתנים לזיהוי אוטומטי אמין מתמונה בלבוש, לכן אלה בסימון ידני. הכלי הוא עזר לעין ולא אבחנה.</p>
   </section>
 </main>
@@ -152,7 +153,8 @@ async function drawSet(gridId, capId, tid, set) {
 function drawCmp() { drawSet('gA', 'capA', $('tA').value, $('sA').value); drawSet('gB', 'capB', $('tB').value, $('sB').value); }
 
 // ---- posture analysis ----
-let landmarker = null, img = null, lm = null, manual = [], manualMode = false;
+let landmarker = null, img = null, lm = null, manual = [], manualMode = false, editMode = false, dragI = -1;
+const EDIT = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
 const LINES = [
   ['axis', 'ציר גוף (זיגזג)', '#e53935'], ['plumb', 'אנך', '#1e88e5'],
   ['eyes', 'עיניים', '#8e24aa'], ['shoulders', 'כתפיים', '#fb8c00'], ['elbows', 'מרפקים', '#43a047'],
@@ -197,7 +199,8 @@ async function run() {
   } catch (e) { $('pnote').textContent = 'המודל לא נטען (אין אינטרנט?). התמונה מוצגת, אפשר לסמן ידנית.'; }
   render();
 }
-const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, v: Math.min(a.v == null ? 1 : a.v, b.v == null ? 1 : b.v) });
+const VMIN = 0.5, good = (...ps) => ps.every((q) => (q.v == null ? 1 : q.v) >= VMIN);
 const ang = (a, b) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 function tilt(a, b) { let d = ang(a, b); if (d > 90) d -= 180; if (d < -90) d += 180; return d; }
 function angle3(a, b, c) {
@@ -218,42 +221,54 @@ function render() {
     g.stroke();
   }
   function dot(p, c) { g.fillStyle = c; g.beginPath(); g.arc(p.x, p.y, lw * 2, 0, 7); g.fill(); }
+  const warn = [];
   if (lm) {
-    const side = $('pV').value === 'LEFT' || $('pV').value === 'RIGHT';
+    const view = $('pV').value, side = view === 'LEFT' || view === 'RIGHT';
     const L = (i) => lm[i];
     const sh = mid(L(11), L(12)), hp = mid(L(23), L(24)), kn = mid(L(25), L(26)), an = mid(L(27), L(28));
-    const earM = mid(L(7), L(8)), eyeM = mid(L(2), L(5));
+    const earM = mid(L(7), L(8)), eyeM = view === 'BACK' ? earM : mid(L(2), L(5));
     const up = { x: sh.x - hp.x, y: sh.y - hp.y }, ul = Math.hypot(up.x, up.y) || 1;
-    const headTop = { x: earM.x + (up.x / ul) * (ul * 0.42), y: earM.y + (up.y / ul) * (ul * 0.42) };
-    const sternum = { x: sh.x + (hp.x - sh.x) * 0.22, y: sh.y + (hp.y - sh.y) * 0.22 };
-    const navel = { x: sh.x + (hp.x - sh.x) * 0.62, y: sh.y + (hp.y - sh.y) * 0.62 };
-    const floor = { x: an.x, y: Math.max(L(29).y, L(30).y, L(31).y, L(32).y, an.y) };
-    // plumb line through the ankles (front/back: between them; side: the visible one)
+    const headTop = { x: earM.x + (up.x / ul) * (ul * 0.42), y: earM.y + (up.y / ul) * (ul * 0.42), v: earM.v };
+    const sternum = { x: sh.x + (hp.x - sh.x) * 0.22, y: sh.y + (hp.y - sh.y) * 0.22, v: Math.min(sh.v, hp.v) };
+    const navel = { x: sh.x + (hp.x - sh.x) * 0.62, y: sh.y + (hp.y - sh.y) * 0.62, v: Math.min(sh.v, hp.v) };
+    const floor = { x: an.x, y: Math.max(L(29).y, L(30).y, L(31).y, L(32).y, an.y), v: an.v };
     const sideIdx = side ? (L(27).v >= L(28).v ? [27, 25, 23, 11, 7] : [28, 26, 24, 12, 8]) : null;
+    const facing = side ? (L(0).x > L(sideIdx[4]).x ? 1 : -1) : 1; // +1 = facing right in the picture
     const px = side ? L(sideIdx[0]).x : an.x;
     if (on.axis) {
-      const pts = side ? [headTop, L(sideIdx[4]), L(sideIdx[3]), L(sideIdx[2]), L(sideIdx[1]), L(sideIdx[0]), floor] : [headTop, eyeM, sh, sternum, navel, hp, kn, an, floor];
-      g.strokeStyle = col.axis; g.lineWidth = lw; g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y))); g.stroke(); pts.forEach((p) => dot(p, col.axis));
+      const pts = (side ? [headTop, L(sideIdx[4]), L(sideIdx[3]), L(sideIdx[2]), L(sideIdx[1]), L(sideIdx[0]), floor] : [headTop, eyeM, sh, sternum, navel, hp, kn, an, floor]).filter((q) => good(q));
+      g.strokeStyle = col.axis; g.lineWidth = lw; g.beginPath(); pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); pts.forEach((q) => dot(q, col.axis));
     }
     if (on.plumb) { g.strokeStyle = col.plumb; g.lineWidth = lw; g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); g.setLineDash([]); }
-    const pair = (k, a, b, label) => { if (!on[k]) return; seg(a, b, k, true); };
+    const NAME = { eyes: 'עיניים', shoulders: 'כתפיים', elbows: 'מרפקים', hips: 'אגן', knees: 'ברכיים', ankles: 'קרסוליים' };
+    const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); return tilt(L(i), L(j)).toFixed(1) + '°'; };
+    const hh = Math.abs(floor.y - headTop.y) || 1;
     if (!side) {
-      pair('eyes', L(2), L(5)); pair('shoulders', L(11), L(12)); pair('elbows', L(13), L(14)); pair('hips', L(23), L(24)); pair('knees', L(25), L(26)); pair('ankles', L(27), L(28));
-      const t2 = (a, b) => tilt(L(a), L(b)).toFixed(1) + '°';
-      out.push('<b>הטיות מהאופקי</b> (מעלות, לפי כיוון התמונה): עיניים ' + t2(2, 5) + ' · כתפיים ' + t2(11, 12) + ' · מרפקים ' + t2(13, 14) + ' · אגן ' + t2(23, 24) + ' · ברכיים ' + t2(25, 26) + ' · קרסוליים ' + t2(27, 28));
-      const hh = Math.abs(floor.y - headTop.y) || 1;
-      out.push('<b>סטייה מהאנך</b> (באחוזי גובה גוף): ראש ' + (((earM.x - px) / hh) * 100).toFixed(1) + '% · כתפיים ' + (((sh.x - px) / hh) * 100).toFixed(1) + '% · אגן ' + (((hp.x - px) / hh) * 100).toFixed(1) + '% · ברכיים ' + (((kn.x - px) / hh) * 100).toFixed(1) + '%');
+      const t = { eyes: view === 'BACK' ? null : pair('eyes', 2, 5), shoulders: pair('shoulders', 11, 12), elbows: pair('elbows', 13, 14), hips: pair('hips', 23, 24), knees: pair('knees', 25, 26), ankles: pair('ankles', 27, 28) };
+      if (view === 'BACK' && on.eyes) warn.push('עיניים (לא נראות מאחור)');
+      const txt = Object.keys(t).filter((k) => t[k]).map((k) => NAME[k] + ' ' + t[k]);
+      if (txt.length) out.push('<b>הטיות מהאופקי</b> (מעלות; מינוס = הצד שמאלי בתמונה גבוה יותר): ' + txt.join(' · '));
+      const dv = (q, n) => (good(q) ? n + ' ' + (((q.x - px) / hh) * 100).toFixed(1) + '%' : null);
+      const dd = [dv(earM, 'ראש'), dv(sh, 'כתפיים'), dv(hp, 'אגן'), dv(kn, 'ברכיים')].filter(Boolean);
+      if (dd.length) out.push('<b>סטייה מהאנך</b> (באחוזי גובה גוף, חיובי = ימינה בתמונה): ' + dd.join(' · '));
     } else {
-      const [A, K, Hp, S, E] = sideIdx.map((i) => L(i)); const el = side ? L(sideIdx[3] + 2) : null, wr = L(sideIdx[3] + 4);
-      const hh = Math.abs(floor.y - headTop.y) || 1, d = (p) => (((p.x - px) / hh) * 100).toFixed(1) + '%';
-      out.push('<b>מיקום ביחס לאנך</b> (באחוזי גובה גוף, חיובי = ימינה בתמונה): אוזן ' + d(E) + ' · כתף ' + d(S) + ' · אגן ' + d(Hp) + ' · ברך ' + d(K));
-      out.push('<b>זווית מרפק</b> ' + angle3(S, el, wr).toFixed(0) + '° · <b>זווית ברך</b> ' + angle3(Hp, K, A).toFixed(0) + '° · <b>הטיית ראש</b> (עין-אוזן) ' + tilt(L(sideIdx[4] === 7 ? 2 : 5), E).toFixed(1) + '°');
-      if (on.knees) { seg({ x: K.x - W / 6, y: K.y }, { x: K.x + W / 6, y: K.y }, 'knees', false); }
-      if (on.hips) { seg({ x: Hp.x - W / 6, y: Hp.y }, { x: Hp.x + W / 6, y: Hp.y }, 'hips', false); }
-      if (on.shoulders) { seg({ x: S.x - W / 6, y: S.y }, { x: S.x + W / 6, y: S.y }, 'shoulders', false); }
-      if (on.elbows) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); }
-      if (on.eyes) { seg(L(sideIdx[4] === 7 ? 2 : 5), E, 'eyes', true); }
-      if (on.ankles) { seg({ x: A.x - W / 6, y: A.y }, { x: A.x + W / 6, y: A.y }, 'ankles', false); }
+      const [A, K, Hp, S, E] = sideIdx.map((i) => L(i)), el = L(sideIdx[3] + 2), wr = L(sideIdx[3] + 4), eye = L(sideIdx[4] === 7 ? 2 : 5);
+      const dv = (q, n) => (good(q) ? n + ' ' + (((q.x - px) * facing / hh) * 100).toFixed(1) + '%' : null);
+      const dd = [dv(E, 'אוזן'), dv(S, 'כתף'), dv(Hp, 'אגן'), dv(K, 'ברך')].filter(Boolean);
+      out.push('<b>מיקום ביחס לאנך</b> (באחוזי גובה גוף, חיובי = קדימה, לכיוון שאליו הוא מסתכל): ' + dd.join(' · '));
+      const ex = [];
+      if (good(S, el, wr)) ex.push('זווית מרפק ' + angle3(S, el, wr).toFixed(0) + '°'); else warn.push('מרפק');
+      if (good(Hp, K, A)) ex.push('זווית ברך ' + angle3(Hp, K, A).toFixed(0) + '°'); else warn.push('ברך');
+      if (good(eye, E)) { const a2 = (Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI; ex.push('זווית הראש (קו עין-אוזן מול אופקי; 0 = ישר, חיובי = מבט כלפי מעלה) ' + a2.toFixed(0) + '°'); }
+      out.push(ex.join(' · '));
+      const hl = (q, k) => { if (!on[k]) return; if (!good(q)) { warn.push(NAME[k]); return; } seg({ x: q.x - W / 6, y: q.y }, { x: q.x + W / 6, y: q.y }, k, false); };
+      hl(K, 'knees'); hl(Hp, 'hips'); hl(S, 'shoulders'); hl(A, 'ankles');
+      if (on.elbows && good(S, el, wr)) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); }
+      if (on.eyes && good(eye, E)) seg(eye, E, 'eyes', true);
+    }
+    if (warn.length) out.push('<span class="err">לא מספיק ברור בתמונה (לא צויר): ' + warn.join(', ') + '. אפשר לתקן בעריכת נקודות.</span>');
+    if (editMode) {
+      EDIT.forEach((i) => { const q = L(i); g.lineWidth = lw; g.strokeStyle = good(q) ? '#ffffff' : '#ff1744'; g.fillStyle = 'rgba(255,214,0,.35)'; g.beginPath(); g.arc(q.x, q.y, lw * 5, 0, 7); g.fill(); g.stroke(); });
     }
   }
   if (manual.length) {
@@ -263,12 +278,22 @@ function render() {
   $('readout').innerHTML = out.map((x) => '<div>' + x + '</div>').join('');
 }
 $('cv').addEventListener('click', (e) => {
-  if (!manualMode || !img) return;
+  if (!manualMode || !img || editMode) return;
   const cv = $('cv'), r = cv.getBoundingClientRect();
   manual.push({ x: ((e.clientX - r.left) / r.width) * cv.width, y: ((e.clientY - r.top) / r.height) * cv.height });
   if (manual.length >= 2) manualMode = false;
   render();
 });
+function cpos(e) { const cv = $('cv'), r = cv.getBoundingClientRect(); return { x: ((e.clientX - r.left) / r.width) * cv.width, y: ((e.clientY - r.top) / r.height) * cv.height }; }
+$('cv').addEventListener('pointerdown', (e) => {
+  if (!editMode || !lm) return;
+  const c = cpos(e); let best = -1, bd = $('cv').width / 14;
+  EDIT.forEach((i) => { const d = Math.hypot(lm[i].x - c.x, lm[i].y - c.y); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) { dragI = best; $('cv').setPointerCapture(e.pointerId); e.preventDefault(); }
+});
+$('cv').addEventListener('pointermove', (e) => { if (dragI < 0) return; const c = cpos(e); lm[dragI].x = c.x; lm[dragI].y = c.y; lm[dragI].v = 1; render(); });
+$('cv').addEventListener('pointerup', () => { dragI = -1; });
+$('edit').onclick = () => { editMode = !editMode; $('edit').className = editMode ? 'on' : ''; $('cv').classList.toggle('editing', editMode); $('pnote').textContent = editMode ? 'גרור את העיגולים הצהובים למקום הנכון. אדום = המערכת לא בטוחה בנקודה.' : ''; render(); };
 $('pelvis').onclick = () => { manual = []; manualMode = true; $('pnote').textContent = 'לחץ על שתי נקודות באגן (למשל קדמית ואחורית) בתמונה.'; render(); };
 $('clearMan').onclick = () => { manual = []; manualMode = false; $('pnote').textContent = ''; render(); };
 $('run').onclick = run;
