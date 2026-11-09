@@ -186,10 +186,14 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
     <p class="small-note">אפשר להסיר ממצא שהוכר לא נכון לפני השליחה. הטקסט המלא נשלח ונשמר בכל מקרה.</p>
   </section>
   <div id="msg" aria-live="polite"></div>
+  <section id="colored" hidden>
+    <p class="small-note">הטקסט בצבעים: <b style="color:var(--ok)">ירוק</b> = תקין · <b style="color:var(--bad)">אדום</b> = בעיה · <b style="color:var(--fix)">סגול</b> = תוקן · שחור = לא נקלט (שיחה / לא זוהה, נשמר וניתן לחיפוש)</p>
+    <div id="coloredText" style="line-height:2;font-size:17px"></div>
+  </section>
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 05/11/2026</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 09/11/2026</span></footer>
 </div>
 
 <script>
@@ -433,6 +437,8 @@ function parseMany(text) {
   // Talk with the patient must not become findings: a result (תקין / בסדר / לא עובד) counts only when a root, muscle, side or direction was said
   // since the last result, and not more than RELGAP words ago. Otherwise it is chat and is skipped (counted in out.ignored).
   var rootFresh = false, relAt = -99, RELGAP = 6, ignored = 0;
+  var spans = [], blockStart = -1; // token ranges that became findings / answers, for the coloured text
+  function mark(k) { if (blockStart < 0) blockStart = k; }
   var unknown = [], hl = null, headLimb = null; // names that could not be resolved; "C" / "L" and "hand" / "leg" said by a header ("יד ימין")
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
   function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
@@ -440,7 +446,7 @@ function parseMany(text) {
   function rootSet(r) {
     if (isMuscle(root)) sticky = null; // a nerve root after the muscle block: the side header is over
     else if (sticky && headLimb && headLimb !== (/^[CT]/.test(r) ? 'hand' : 'leg')) sticky = null;
-    root = r; rootAt = i; hl = null; rootFresh = true; relAt = i;
+    root = r; rootAt = i; hl = null; rootFresh = true; relAt = i; mark(i);
   }
   function mk(result, d, sd, phrase, g) {
     var m = isMuscle(root);
@@ -459,7 +465,7 @@ function parseMany(text) {
   // Several directions + "ok": every direction named is ok.
   function emit(result, at, end, force) {
     var to = end == null ? at : end;
-    if (!force && root && !isUnk(root) && (!(rootFresh || dirs.length || sides.length) || at - relAt > RELGAP)) { ignored++; dirs = []; sides = []; allDirs = false; return; }
+    if (!force && root && !isUnk(root) && (!(rootFresh || dirs.length || sides.length) || at - relAt > RELGAP)) { ignored++; dirs = []; sides = []; allDirs = false; blockStart = -1; return; }
     if (root && !isUnk(root)) {
       var ds = uniq(dirs);
       if (result === 'problem' && ds.length > 1 && !allDirs) ds = [ds[ds.length - 1]];
@@ -472,6 +478,7 @@ function parseMany(text) {
       ds.forEach(function (d) {
         sidesFor(d, ex).forEach(function (sd) { out.push(mk(result, d, sd, phrase, gid)); });
       });
+      spans.push({ a: blockStart >= 0 ? blockStart : at, b: to, k: result }); blockStart = -1;
       lastEmit = at; lastEnd = to; rootFresh = false;
     } else if (!root) {
       orphans.push(toks.slice(Math.max(0, at - 4), to + 1).join(' '));
@@ -486,6 +493,7 @@ function parseMany(text) {
   // which one. Said twice ("מתוקן ... תוקן"), the second time is ignored. With no "לא עובד" before it at all
   // ("סקלני ימין תוקן"), a fix means there was a problem, so the problem is added already answered.
   function answerLast(ans, at, end, how) {
+    spans.push({ a: at, b: end, k: ans === 'fixed' ? 'fixed' : 'problem' });
     var want = uniq(sides.concat(dirs.indexOf('bendR') >= 0 ? ['right'] : [], dirs.indexOf('bendL') >= 0 ? ['left'] : []));
     var cand = null, pass, k, f;
     function sideOk(x) { return !want.length || !x.side || want.indexOf(x.side) >= 0; }
@@ -522,6 +530,41 @@ function parseMany(text) {
     lastEnd = Math.max(lastEnd, end); // the next finding's phrase starts after this answer
     dirs = []; sides = []; allDirs = false;
   }
+  // "הכל תקין" / "כל העצבים תקין": everything in the named scope is fine, except what was already said (a problem said earlier is never overwritten).
+  //   "c7 הכל תקין" -> the root, all four directions; "יד ימין הכל תקין" -> the hand roots on that side; "כל העצבים תקין" -> every root, both sides.
+  function allOk(i) {
+    var pv1 = toks[i - 1] || '', pv2 = toks[i - 2] || '', pv3 = toks[i - 3] || '';
+    var ALLW = /^(?:הכל|הכול|כולם|כולן)$/, NERVEW = /^ה?עצבים$/;
+    var roots = null, sidesList = null;
+    if ((pv1 === 'כל' || ALLW.test(pv1)) && false) return false;
+    if (NERVEW.test(pv1) && pv2 === 'כל' || ALLW.test(pv1) && NERVEW.test(pv2) || NERVEW.test(pv1) && ALLW.test(pv2)) { roots = ROOTS; sidesList = ['right', 'left']; }
+    else if (ALLW.test(pv1)) {
+      var sdp = SIDER.test(pv2) ? 'right' : SIDEL.test(pv2) ? 'left' : null;
+      if (sdp && SIDEHEAD.test(pv3) && /^(?:ה?יד|ה?רגל|ה?רגע)$/.test(pv3)) {
+        roots = /^ה?יד$/.test(pv3) ? ['C5', 'C6', 'C7', 'C8', 'T1'] : ['L2', 'L3', 'L4', 'L5', 'S1', 'S2']; sidesList = [sdp];
+      } else if (root && !isMuscle(root) && !isUnk(root) && rootFresh) {
+        roots = [root]; sidesList = sides.length ? uniq(sides) : (sticky ? [sticky] : [null]);
+        if (SIDEBOTH.test(pv2) || (SIDER.test(pv2) && SIDEL.test(toks[i - 3] || '')) || (SIDEL.test(pv2) && SIDER.test(toks[i - 3] || ''))) sidesList = ['right', 'left'];
+      } else if (root && isMuscle(root) && rootFresh) { return false; } // a muscle said "הכל תקין": the plain "תקין" below handles it
+      else return false;
+    } else return false;
+    var DIRL = ['fwd', 'back', 'bendR', 'bendL'], saveRoot = root, added = 0;
+    roots.forEach(function (r) {
+      var rg = 0;
+      DIRL.forEach(function (d) {
+        sidesList.forEach(function (sd) {
+          var exists = out.some(function (x) { return x.key === r && x.dir === d && x.side === sd; });
+          if (exists) return;
+          if (!rg) { gid++; rg = gid; }
+          root = r; out.push(mk('ok', d, sd, toks.slice(Math.max(0, i - 3), i + 1).join(' '), rg)); added++;
+        });
+      });
+    });
+    root = saveRoot;
+    spans.push({ a: blockStart >= 0 ? blockStart : Math.max(0, i - 2), b: i, k: 'ok' }); blockStart = -1;
+    lastEmit = i; lastEnd = i; rootFresh = false; dirs = []; sides = []; allDirs = false;
+    return true;
+  }
   for (var i = 0; i < toks.length; i++) {
     var w = toks[i], nx = toks[i + 1] || '', pv = toks[i - 1] || '';
     var rm = /^([LCST])(\d)$/i.exec(w);
@@ -535,7 +578,7 @@ function parseMany(text) {
     var mm = findMuscle(toks, i);
     if (mm) {
       flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
-      root = mm.id; rootAt = i; hl = null; rootFresh = true; relAt = i + mm.n - 1;
+      root = mm.id; rootAt = i; hl = null; rootFresh = true; relAt = i + mm.n - 1; mark(i);
       if (isUnk(mm.id)) unknown.push(toks.slice(i, i + mm.n).join(' '));
       i += mm.n - 1; continue;
     }
@@ -544,7 +587,7 @@ function parseMany(text) {
     if (FIXW.test(w)) { var hw = howAfter(toks, i); answerLast('fixed', i, hw.end, hw.ids); i = hw.end; continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
     if (BADW.test(w)) { emit('problem', i); continue; }
-    if (OKW.test(w)) { emit('ok', i); continue; }
+    if (OKW.test(w)) { if (allOk(i)) continue; emit('ok', i); continue; }
     if (/^ה?כיוונים$/.test(w)) {
       var prev = out[out.length - 1];
       if (prev && prev.key === root && prev.dir === null && i - lastEmit <= 3) {
@@ -564,7 +607,7 @@ function parseMany(text) {
         sticky = sd; sides = [];
         headLimb = /^ה?יד$/.test(pv) ? 'hand' : /^ה?(?:רגל|רגע)$/.test(pv) ? 'leg' : null;
         hl = headLimb === 'hand' ? 'C' : headLimb === 'leg' ? 'L' : hl;
-      } else { sides.push(sd); relAt = i; }
+      } else { sides.push(sd); relAt = i; mark(i); }
       continue;
     }
     if (SIDEBOTH.test(w)) {
@@ -578,13 +621,13 @@ function parseMany(text) {
         continue;
       }
       if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null;
-      sides.push('right', 'left'); relAt = i; continue;
+      sides.push('right', 'left'); relAt = i; mark(i); continue;
     }
     if (BLOCKW.test(w)) { flush(); root = null; sticky = null; hl = null; continue; }
-    if (/^אחור\S*$/.test(w)) { dirs.push('back'); relAt = i; }
-    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) { dirs.push('fwd'); relAt = i; }
-    else if (w === 'ימינה') { dirs.push('bendR'); relAt = i; }
-    else if (w === 'שמאלה') { dirs.push('bendL'); relAt = i; }
+    if (/^אחור\S*$/.test(w)) { dirs.push('back'); relAt = i; mark(i); }
+    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) { dirs.push('fwd'); relAt = i; mark(i); }
+    else if (w === 'ימינה') { dirs.push('bendR'); relAt = i; mark(i); }
+    else if (w === 'שמאלה') { dirs.push('bendL'); relAt = i; mark(i); }
   }
   flush();
   // "ימין לא עובד" said with no name, then at once the same side + problem with a named muscle ("פירי פורמס ימין לא עובד"):
@@ -599,6 +642,8 @@ function parseMany(text) {
   out.orphans = orphans;
   out.unknown = unknown;
   out.ignored = ignored;
+  out.spans = spans;
+  out.toks = toks;
   return out;
 }
 
@@ -812,7 +857,26 @@ document.addEventListener('visibilitychange', function () {
 });
 
 // ---- analyze ---------------------------------------------------------------
-var found = [];
+var found = [], lastRec = '', lastIgn = '';
+function paintText(all) {
+  var toks = all.toks || [], col = new Array(toks.length), box = $('coloredText');
+  (all.spans || []).forEach(function (sp) { for (var k = sp.a; k <= sp.b && k < toks.length; k++) col[k] = sp.k; });
+  box.textContent = '';
+  var rec = [], ign = [], run = [];
+  function flush() { if (run.length) { ign.push(run.join(' ')); run = []; } }
+  toks.forEach(function (w, k) {
+    var sp = el('span', null, w + ' ');
+    var c = col[k];
+    if (c === 'ok') { sp.style.color = 'var(--ok)'; rec.push(w); flush(); }
+    else if (c === 'problem') { sp.style.color = 'var(--bad)'; rec.push(w); flush(); }
+    else if (c === 'fixed') { sp.style.color = 'var(--fix)'; rec.push(w); flush(); }
+    else run.push(w);
+    box.appendChild(sp);
+  });
+  flush();
+  lastRec = rec.join(' '); lastIgn = ign.join(' | ');
+  $('colored').hidden = !toks.length;
+}
 function analyze() {
   $('msg').textContent = '';
   var text = said.value.trim();
@@ -841,6 +905,7 @@ function analyze() {
   if (nos) parts.push('בעיה בלי צד (ימין / שמאל): ' + nos + '. היא תישמר בהערות השורה, צריך לסמן ידנית באפליקציה');
   if (un.length) parts.push('תשובת "תוקן / לא תוקן" שלא נמצאה לה בעיה מתאימה: ' + un.length);
   $('notice').hidden = !parts.length; $('notice').textContent = parts.join('. ');
+  paintText(all);
   renderFound();
 }
 
@@ -884,7 +949,7 @@ $('send').onclick = function () {
   if (!text) return;
   if (!pendingId) pendingId = newId(); // same id on retry, so the server can ignore a duplicate
   var body = {
-    pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text,
+    pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text, recognized: lastRec, ignored: lastIgn,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
       return { n: i + 1, root: f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '', how: (f.how || []).join(',') };
@@ -900,7 +965,7 @@ $('send').onclick = function () {
           + (j.waiting > 0 ? ' השורות של הטיפול עוד לא הגיעו מהטאבלט לגיליון. הממצאים ייכנסו אליהן אוטומטית תוך כמה דקות, ואז לרענן את האפליקציה.'
             : j.done > 0 ? ' הממצאים נכתבו לשורות הטיפול. לרענן את האפליקציה כדי לראות אותם.' : '');
         said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); found = [];
-        $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true;
+        $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true; $('colored').hidden = true; lastRec = ''; lastIgn = '';
       } else {
         msg.className = 'errmsg';
         msg.textContent = 'השרת סירב: ' + ((j && j.error) || 'שגיאה לא ידועה') + '. הטקסט נשמר בטאבלט.';
