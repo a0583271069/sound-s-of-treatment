@@ -7,7 +7,7 @@
 var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
 var T_HEAD = ['received_at', 'updated_at', 'session_id', 'patient', 'lang', 'findings_count',
-  'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2', 'treatment_id'];
+  'raw_text', 'raw_text_2', 'raw_text_3', 'raw_text_4', 'timeline', 'timeline_2', 'treatment_id', 'recognized', 'ignored'];
 var F_HEAD = ['received_at', 'session_id', 'patient', 'n', 'root', 'result', 'direction', 'direction_he', 'fixed', 'phrase', 'muscle', 'treatment_id', 'side', 'muscle_id', 'applied', 'how'];
 var BACKUP_FOLDER = 'גיבויי קליניקה';
 var BACKUP_KEEP = 8;
@@ -42,6 +42,39 @@ function fmtTime_(sec) {
   return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
 }
 
+// ---- photo page: list of treatments and the photos (password protected, read only) --------------------
+function listData_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('TREATMENTS');
+  if (!sh || sh.getLastRow() < 2) return { ok: true, treatments: [] };
+  var v = sh.getDataRange().getDisplayValues(), h = v[0], res = [];
+  var cols = ['Treatment_ID', 'PATIENT_ID', 'TREATMENT_NUMBER', 'DATE', 'PHOTO_FRONT', 'PHOTO_LEFT', 'PHOTO_BACK', 'PHOTO_RIGHT', 'AFTER_FRONT', 'AFTER_LEFT', 'AFTER_BACK', 'AFTER_RIGHT'];
+  var ix = cols.map(function (c) { return h.indexOf(c); });
+  for (var i = 1; i < v.length; i++) {
+    var o = {};
+    cols.forEach(function (c, k) { o[c] = ix[k] >= 0 ? String(v[i][ix[k]]) : ''; });
+    if (o.Treatment_ID) res.push(o);
+  }
+  var names = {};
+  var ps = ss.getSheetByName('PATIENTS');
+  if (ps && ps.getLastRow() > 1) {
+    var pv = ps.getDataRange().getDisplayValues(), ph = pv[0];
+    var ci = ph.indexOf('PATIENT_ID'), cn = -1;
+    ph.forEach(function (x, k) { if (cn < 0 && /name|שם/i.test(x)) cn = k; });
+    if (ci >= 0 && cn >= 0) for (var j = 1; j < pv.length; j++) names[String(pv[j][ci])] = String(pv[j][cn]);
+  }
+  return { ok: true, treatments: res, names: names };
+}
+
+function photo_(file) {
+  var base = file.split('/').pop();
+  if (!base) return { ok: false, error: 'no file' };
+  var it = DriveApp.getFilesByName(base);
+  if (!it.hasNext()) return { ok: false, error: 'not found' };
+  var b = it.next().getBlob();
+  return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
+}
+
 function doGet() { return out_({ ok: true, service: 'clinic-dictation' }); }
 
 function doPost(e) {
@@ -51,6 +84,8 @@ function doPost(e) {
     var d = JSON.parse(e.postData.contents);
     var pw = PropertiesService.getScriptProperties().getProperty('PASSWORD');
     if (!pw || String(d.pw) !== pw) return out_({ ok: false, error: 'סיסמה שגויה' });
+    if (d.action === 'list') return out_(listData_());
+    if (d.action === 'photo') return out_(photo_(String(d.file || '')));
     var session = String(d.session || '');
     if (!session) return out_({ ok: false, error: 'חסר מזהה' });
 
@@ -77,9 +112,10 @@ function doPost(e) {
       t.getRange(row, 4, 1, 3).setNumberFormat('@').setValues([[patient, String(d.lang || ''), nFind]]);
       t.getRange(row, 7, 1, 6).setNumberFormat('@').setValues([rp.concat(tp)]);
       if (tid) t.getRange(row, 13, 1, 1).setNumberFormat('@').setValue(tid);
+      if (!partial) t.getRange(row, 14, 1, 2).setNumberFormat('@').setValues([[String(d.recognized || '').substr(0, CHUNK), String(d.ignored || '').substr(0, CHUNK)]]);
     } else {
       row = last + 1;
-      var vals = [now, now, session, patient, String(d.lang || ''), nFind].concat(rp, tp, [tid]);
+      var vals = [now, now, session, patient, String(d.lang || ''), nFind].concat(rp, tp, [tid, String(d.recognized || '').substr(0, CHUNK), String(d.ignored || '').substr(0, CHUNK)]);
       t.getRange(row, 1, 1, vals.length).setNumberFormat('@').setValues([vals]);
     }
 
