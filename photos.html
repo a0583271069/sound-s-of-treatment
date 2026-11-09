@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 18:30</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 20:30</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -50,6 +50,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
     <button id="reload" type="button">רענן רשימה</button>
     <span id="status" class="note"></span>
   </div>
+  <div class="row"><label>אנך מבוסס על <select id="plumbRef"><option value="ANKLE">קרסוליים (ברירת מחדל)</option><option value="HIP">אמצע האגן (חריץ הישבן)</option><option value="HEAD">הראש (אוזן)</option></select></label></div>
   <div class="tabs">
     <button id="tabCmp" class="on" type="button">השוואה</button>
     <button id="tabPose" type="button">ניתוח יציבה</button>
@@ -192,7 +193,7 @@ async function cmpAnalyse() {
     for (const c of cmpCells) {
       if (!poseCache[c.path]) {
         const res = m.detect(c.im);
-        poseCache[c.path] = res.landmarks && res.landmarks[0] ? res.landmarks[0].map((q) => ({ x: q.x * c.cv.width, y: q.y * c.cv.height, v: q.visibility })) : null;
+        poseCache[c.path] = res.landmarks && res.landmarks[0] ? fixEar(res.landmarks[0].map((q) => ({ x: q.x * c.cv.width, y: q.y * c.cv.height, v: q.visibility }))) : null;
       }
       c.lm = poseCache[c.path]; paintCell(c);
     }
@@ -244,7 +245,7 @@ async function run() {
   try {
     const m = await ensureModel();
     const res = m.detect(cv);
-    lm = res.landmarks && res.landmarks[0] ? res.landmarks[0].map((p) => ({ x: p.x * cv.width, y: p.y * cv.height, v: p.visibility })) : null;
+    lm = res.landmarks && res.landmarks[0] ? fixEar(res.landmarks[0].map((p) => ({ x: p.x * cv.width, y: p.y * cv.height, v: p.visibility }))) : null;
     $('pnote').textContent = lm ? '' : 'לא זוהה גוף בתמונה. אפשר לצלם מרחוק יותר, עם כל הגוף בפריים.';
   } catch (e) { $('pnote').textContent = 'המודל לא נטען (אין אינטרנט?). התמונה מוצגת, אפשר לסמן ידנית.'; }
   render();
@@ -257,6 +258,12 @@ function angle3(a, b, c) {
   const v1 = { x: a.x - b.x, y: a.y - b.y }, v2 = { x: c.x - b.x, y: c.y - b.y };
   const d = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
   return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
+}
+// the detector puts the ear point at the ear canal; the clinic rule is "top of the ear level with the eye", so the points are lifted a little (can be dragged afterwards)
+function fixEar(arr) {
+  if (!arr) return arr;
+  [[7, 2], [8, 5]].forEach(([e, y]) => { const d = Math.hypot(arr[e].x - arr[y].x, arr[e].y - arr[y].y); arr[e].y -= 0.28 * d; });
+  return arr;
 }
 function paint(cv, im, lm, view0, isMain) {
   const g = cv.getContext('2d'), W = cv.width, H = cv.height, lw = Math.max(2, W / 400);
@@ -283,7 +290,8 @@ function paint(cv, im, lm, view0, isMain) {
     const floor = { x: an.x, y: Math.max(L(29).y, L(30).y, L(31).y, L(32).y, an.y), v: an.v };
     const sideIdx = side ? (L(27).v >= L(28).v ? [27, 25, 23, 11, 7] : [28, 26, 24, 12, 8]) : null;
     const facing = side ? (L(0).x > L(sideIdx[4]).x ? 1 : -1) : 1; // +1 = facing right in the picture
-    const px = side ? L(sideIdx[0]).x : an.x;
+    const pref = $('plumbRef').value;
+    const px = pref === 'HIP' ? (side ? L(sideIdx[2]).x : hp.x) : pref === 'HEAD' ? (side ? L(sideIdx[4]).x : earM.x) : side ? L(sideIdx[0]).x : an.x;
     if (on.axis) {
       const pts = (side ? [headTop, L(sideIdx[4]), L(sideIdx[3]), L(sideIdx[2]), L(sideIdx[1]), L(sideIdx[0]), floor] : [headTop, eyeM, sh, sternum, navel, hp, kn, an, floor]).filter((q) => good(q));
       g.strokeStyle = col.axis; g.lineWidth = lw; g.beginPath(); pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); pts.forEach((q) => dot(q, col.axis));
@@ -308,12 +316,15 @@ function paint(cv, im, lm, view0, isMain) {
       const ex = [];
       if (good(S, el, wr)) ex.push('זווית מרפק ' + angle3(S, el, wr).toFixed(0) + '°'); else warn.push('מרפק');
       if (good(Hp, K, A)) ex.push('זווית ברך ' + angle3(Hp, K, A).toFixed(0) + '°'); else warn.push('ברך');
-      if (good(eye, E)) { const a2 = (Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI; ex.push('זווית הראש (קו עין-אוזן מול אופקי; 0 = ישר, חיובי = מבט כלפי מעלה) ' + a2.toFixed(0) + '°'); }
+      if (good(eye, E)) { const a2 = (Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI; ex.push('זווית הראש (קו עין – ראש האוזן מול אופקי; 0 = שווה גובה, חיובי = מבט כלפי מעלה) ' + a2.toFixed(0) + '°'); }
       out.push(ex.join(' · '));
       const hl = (q, k) => { if (!on[k]) return; if (!good(q)) { warn.push(NAME[k]); return; } seg({ x: q.x - W / 6, y: q.y }, { x: q.x + W / 6, y: q.y }, k, false); };
       hl(K, 'knees'); hl(Hp, 'hips'); hl(S, 'shoulders'); hl(A, 'ankles');
       if (on.elbows && good(S, el, wr)) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); }
-      if (on.eyes && good(eye, E)) seg(eye, E, 'eyes', true);
+      if (on.eyes && good(eye, E)) {
+        seg(eye, E, 'eyes', false);
+        g.fillStyle = col.eyes; g.font = Math.round(W / 32) + 'px sans-serif'; g.fillText(((Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI).toFixed(0) + '°', (eye.x + E.x) / 2 + lw * 6, (eye.y + E.y) / 2 - lw * 6);
+      }
     }
     if (warn.length) out.push('<span class="err">לא מספיק ברור בתמונה (לא צויר): ' + warn.join(', ') + '. אפשר לתקן בעריכת נקודות.</span>');
     if (isMain && editMode) {
@@ -356,6 +367,7 @@ $('run').onclick = run;
 $('pat').onchange = fillTreatments;
 ['tA', 'tB', 'sA', 'sB'].forEach((i) => ($(i).onchange = drawCmp));
 $('reload').onclick = load;
+$('plumbRef').onchange = () => { render(); repaintCmp(); };
 $('cmpLinesBtn').onclick = cmpAnalyse;
 $('cmpNormBtn').onclick = async () => {
   cmpNorm = !cmpNorm; $('cmpNormBtn').className = cmpNorm ? 'on' : '';
