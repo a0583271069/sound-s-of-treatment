@@ -227,10 +227,10 @@ var MDB = [
   ['M16','tibialis anterior','טיביאליס אנטריור|טיביאליס קדמי|טיביאליס אנטיריור|טיביאליס אנטרור|טיביאלוס אנטריור'],
   ['M17','fibularis (peroneus)','פרונאוס|פיברולריס|פיבולריס|פרוניאוס|פרוניאל|פרונאל|פרונאוס לונגוס'],
   ['M18','tibialis posterior','טיביאליס פוסטריור|טיביאליס אחורי|טיביאליס פוסטיריור|טיביאלוס פוסטריור'],
-  ['M19','gluteus maximus','גלוטאוס מקסימוס|גלוטאוס מכסימוס|גלוטיאוס מקסימוס|גלוטאוס מקסימום|בלוטוס מקסימוס|גלוטוס מקסימוס|קוטוס מקסימום|קורס מקסימום|קוטוס מקסימוס|קורס מקסימוס|מקסימום|מקסימוס|מכסימוס'],
+  ['M19','gluteus maximus','גלוטאוס מקסימוס|גלוטאוס מכסימוס|גלוטיאוס מקסימוס|גלוטאוס מקסימום|בלוטוס מקסימוס|גלוטוס מקסימוס|קוטוס מקסימום|קורס מקסימום|קוטוס מקסימוס|קורס מקסימוס|מקסימוס|מכסימוס'],
   ['M20','hamstrings','המסטרינג|המסטרינגס|המסטרינגז|המסטרינג|איי אם סטרינגס|אים סטרינגס|סטרינגס|im strings|i m strings'],
   ['M21','biceps femoris','ביספס פמוריס|ביצפס פמוריס|ביספס פמורוס|ביספס פמורס|בייספס פמוריס|ויצבס פמוריס|ביצבס פמוריס|בי ספס פמוריס|בית 6 פמוריס'],
-  ['M22','semitendinosus / semimembranosus','סמיטנדינוזוס|סמיטנדינוסוס|סמימבראנוזוס|סמימברנוסוס|סמיטנדינוזוס סמימבראנוזוס|סמי טנדינוזוס|סמי'],
+  ['M22','semitendinosus / semimembranosus','סמיטנדינוזוס|סמיטנדינוסוס|סמימבראנוזוס|סמימברנוסוס|סמיטנדינוזוס סמימבראנוזוס|סמי טנדינוזוס'],
   ['M23','piriformis','פיריפורמיס|פרפורמיס|פירפורמיס|פיריפורמס|פירפורמס|רפורמיס|פירי פורמיס|פילי פורמיס|פיריפורמיוס|פריפורמיס|פריפורמס|פריפור|פיריפור|פירפור|פריפורם|פיריפורם'],
   ['M24','soleus','סולאוס|סוליאוס|סוליוס|סולאוז'],
   ['M25','erector spinae','ארקטור ספיינה|אריקטור ספיינה|ארקטור ספינה|ארקטור ספיני|ארקטור'],
@@ -430,6 +430,9 @@ function markHow(list, key, ids) {
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
   var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0;
+  // Talk with the patient must not become findings: a result (תקין / בסדר / לא עובד) counts only when a root, muscle, side or direction was said
+  // since the last result, and not more than RELGAP words ago. Otherwise it is chat and is skipped (counted in out.ignored).
+  var rootFresh = false, relAt = -99, RELGAP = 6, ignored = 0;
   var unknown = [], hl = null, headLimb = null; // names that could not be resolved; "C" / "L" and "hand" / "leg" said by a header ("יד ימין")
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
   function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
@@ -437,7 +440,7 @@ function parseMany(text) {
   function rootSet(r) {
     if (isMuscle(root)) sticky = null; // a nerve root after the muscle block: the side header is over
     else if (sticky && headLimb && headLimb !== (/^[CT]/.test(r) ? 'hand' : 'leg')) sticky = null;
-    root = r; rootAt = i; hl = null;
+    root = r; rootAt = i; hl = null; rootFresh = true; relAt = i;
   }
   function mk(result, d, sd, phrase, g) {
     var m = isMuscle(root);
@@ -454,8 +457,9 @@ function parseMany(text) {
   }
   // Several directions + "problem": the last one wins (a slip of the tongue).
   // Several directions + "ok": every direction named is ok.
-  function emit(result, at, end) {
+  function emit(result, at, end, force) {
     var to = end == null ? at : end;
+    if (!force && root && !isUnk(root) && (!(rootFresh || dirs.length || sides.length) || at - relAt > RELGAP)) { ignored++; dirs = []; sides = []; allDirs = false; return; }
     if (root && !isUnk(root)) {
       var ds = uniq(dirs);
       if (result === 'problem' && ds.length > 1 && !allDirs) ds = [ds[ds.length - 1]];
@@ -468,7 +472,7 @@ function parseMany(text) {
       ds.forEach(function (d) {
         sidesFor(d, ex).forEach(function (sd) { out.push(mk(result, d, sd, phrase, gid)); });
       });
-      lastEmit = at; lastEnd = to;
+      lastEmit = at; lastEnd = to; rootFresh = false;
     } else if (!root) {
       orphans.push(toks.slice(Math.max(0, at - 4), to + 1).join(' '));
     } // a root that was heard but not resolved is reported once, under "unknown"
@@ -507,7 +511,7 @@ function parseMany(text) {
       if (dup) {
         if (how && how.length && dup.muscle_id) out.forEach(function (x) { if (x.g === dup.g && sideOk(x)) x.how = uniq((x.how || []).concat(how)); });
       } else if (root && !isUnk(root) && (sides.length || dirs.length || sticky)) {
-        emit('problem', at, end);
+        emit('problem', at, end, true);
         var g2 = gid;
         out.forEach(function (x) { if (x.g === g2) { put(x); x.implied = true; } });
         return;
@@ -531,7 +535,7 @@ function parseMany(text) {
     var mm = findMuscle(toks, i);
     if (mm) {
       flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
-      root = mm.id; rootAt = i; hl = null;
+      root = mm.id; rootAt = i; hl = null; rootFresh = true; relAt = i + mm.n - 1;
       if (isUnk(mm.id)) unknown.push(toks.slice(i, i + mm.n).join(' '));
       i += mm.n - 1; continue;
     }
@@ -560,7 +564,7 @@ function parseMany(text) {
         sticky = sd; sides = [];
         headLimb = /^ה?יד$/.test(pv) ? 'hand' : /^ה?(?:רגל|רגע)$/.test(pv) ? 'leg' : null;
         hl = headLimb === 'hand' ? 'C' : headLimb === 'leg' ? 'L' : hl;
-      } else sides.push(sd);
+      } else { sides.push(sd); relAt = i; }
       continue;
     }
     if (SIDEBOTH.test(w)) {
@@ -574,13 +578,13 @@ function parseMany(text) {
         continue;
       }
       if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null;
-      sides.push('right', 'left'); continue;
+      sides.push('right', 'left'); relAt = i; continue;
     }
     if (BLOCKW.test(w)) { flush(); root = null; sticky = null; hl = null; continue; }
-    if (/^אחור\S*$/.test(w)) dirs.push('back');
-    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) dirs.push('fwd');
-    else if (w === 'ימינה') dirs.push('bendR');
-    else if (w === 'שמאלה') dirs.push('bendL');
+    if (/^אחור\S*$/.test(w)) { dirs.push('back'); relAt = i; }
+    else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) { dirs.push('fwd'); relAt = i; }
+    else if (w === 'ימינה') { dirs.push('bendR'); relAt = i; }
+    else if (w === 'שמאלה') { dirs.push('bendL'); relAt = i; }
   }
   flush();
   // "ימין לא עובד" said with no name, then at once the same side + problem with a named muscle ("פירי פורמס ימין לא עובד"):
@@ -594,6 +598,7 @@ function parseMany(text) {
   out.unmatched = unmatched;
   out.orphans = orphans;
   out.unknown = unknown;
+  out.ignored = ignored;
   return out;
 }
 
