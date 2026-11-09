@@ -23,14 +23,14 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 .note { color:var(--muted); font-size:14px; margin:6px 0; }
 .err { color:var(--bad); }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:4px 0 10px; align-items:start; }
-.pair canvas { width:100%; height:auto; border-radius:6px; display:block; }
+.pair canvas { width:100%; height:auto; max-height:85vh; object-fit:contain; border-radius:6px; display:block; }
 .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
 .cell { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:4px; text-align:center; min-height:60px; }
 .cell img { width:100%; height:auto; display:block; border-radius:6px; }
 .cell small { color:var(--muted); display:block; }
 .cap { font-weight:700; margin:12px 0 4px; }
 #cv.editing { touch-action:none; cursor:grab; }
-#cv { max-width:100%; height:auto; background:#000; border-radius:8px; touch-action:manipulation; }
+#cv { max-width:100%; height:auto; max-height:85vh; object-fit:contain; background:#000; border-radius:8px; touch-action:manipulation; }
 .tg button { min-height:34px; padding:4px 10px; font-size:14px; }
 .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-inline-end:4px; vertical-align:middle; }
 #readout { font-size:14px; line-height:1.7; }
@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 18:10</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 18:30</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -63,7 +63,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
       <select id="sB"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
     </div>
     <div class="row tg" id="toggles2"></div>
-    <div class="row"><button id="cmpLinesBtn" type="button">הצג קווים בהשוואה</button><span id="cmpNote" class="note"></span></div>
+    <div class="row"><button id="cmpLinesBtn" type="button">הצג קווים בהשוואה</button><button id="cmpNormBtn" type="button">התאם לגובה גוף</button><span id="cmpNote" class="note"></span></div>
     <div class="cap" id="capA"></div><div class="cap" id="capB"></div>
     <div id="pairs"></div>
   </section>
@@ -165,11 +165,27 @@ async function drawCmp() {
     });
   }
 }
-function paintCell(c) { paint(c.cv, c.im, cmpLines ? c.lm : null, c.view, false); }
+let cmpNorm = false;
+const FW = 900, FH = 1200;
+function paintCell(c) {
+  if (cmpNorm && cmpLines && c.lm) {
+    // same body height in every photo: scale uniformly (no stretching) so head-to-floor fills the same part of the frame
+    const L = c.lm, floor = Math.max(L[27].y, L[28].y, L[29].y, L[30].y, L[31].y, L[32].y), top = L[0].y - 0.08 * (floor - L[0].y), h = floor - top;
+    const sc = (0.82 * FH) / h, cx = (L[23].x + L[24].x) / 2;
+    const off = c.off || (c.off = document.createElement('canvas')); off.width = c.im.naturalWidth; off.height = c.im.naturalHeight;
+    paint(off, c.im, c.lm, c.view, false);
+    if (c.cv.width !== FW || c.cv.height !== FH) { c.cv.width = FW; c.cv.height = FH; }
+    const g = c.cv.getContext('2d'); g.fillStyle = '#d9dedb'; g.fillRect(0, 0, FW, FH);
+    g.drawImage(off, FW / 2 - cx * sc, FH * 0.09 - top * sc, off.width * sc, off.height * sc);
+    return;
+  }
+  if (c.cv.width !== c.im.naturalWidth || c.cv.height !== c.im.naturalHeight) { c.cv.width = c.im.naturalWidth; c.cv.height = c.im.naturalHeight; }
+  paint(c.cv, c.im, cmpLines ? c.lm : null, c.view, false);
+}
 function repaintCmp() { cmpCells.forEach(paintCell); }
 async function cmpAnalyse() {
   cmpLines = !cmpLines; $('cmpLinesBtn').className = cmpLines ? 'on' : '';
-  if (!cmpLines) { repaintCmp(); $('cmpNote').textContent = ''; return; }
+  if (!cmpLines) { cmpNorm = false; $('cmpNormBtn').className = ''; repaintCmp(); $('cmpNote').textContent = ''; return; }
   $('cmpNote').textContent = 'מנתח…';
   try {
     const m = await ensureModel();
@@ -341,6 +357,11 @@ $('pat').onchange = fillTreatments;
 ['tA', 'tB', 'sA', 'sB'].forEach((i) => ($(i).onchange = drawCmp));
 $('reload').onclick = load;
 $('cmpLinesBtn').onclick = cmpAnalyse;
+$('cmpNormBtn').onclick = async () => {
+  cmpNorm = !cmpNorm; $('cmpNormBtn').className = cmpNorm ? 'on' : '';
+  if (cmpNorm && !cmpLines) await cmpAnalyse();
+  repaintCmp();
+};
 $('cfgSave').onclick = () => { cfg = { url: $('cfgUrl').value.trim(), pw: $('cfgPw').value }; lsSet(CFG, JSON.stringify(cfg)); load(); };
 function tab(p) { $('cmp').hidden = p; $('pose').hidden = !p; $('tabCmp').className = p ? '' : 'on'; $('tabPose').className = p ? 'on' : ''; }
 $('tabCmp').onclick = () => tab(false); $('tabPose').onclick = () => tab(true);
