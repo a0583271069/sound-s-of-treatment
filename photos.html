@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 19:30</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 20:30</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -50,7 +50,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
     <button id="reload" type="button">רענן רשימה</button>
     <span id="status" class="note"></span>
   </div>
-  <div class="row"><label>אנך מבוסס על <select id="plumbRef"><option value="ANKLE">קרסוליים (ברירת מחדל)</option><option value="HIP">אמצע האגן (חריץ הישבן)</option><option value="HEAD">הראש (אוזן)</option></select></label></div>
+  <div class="row"><label>אנך מבוסס על <select id="plumbRef"><option value="HIP" selected>אמצע האגן (ברירת מחדל)</option><option value="ANKLE">קרסוליים</option><option value="HEAD">הראש (אוזן)</option></select></label></div>
   <div class="tabs">
     <button id="tabCmp" class="on" type="button">השוואה</button>
     <button id="tabPose" type="button">ניתוח יציבה</button>
@@ -317,7 +317,7 @@ function paint(cv, im, lm, view0, isMain) {
     }
     if (on.plumb) { g.strokeStyle = col.plumb; g.lineWidth = lw; g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); g.setLineDash([]); }
     const NAME = { eyes: 'עיניים', shoulders: 'כתפיים', elbows: 'מרפקים', hips: 'אגן', knees: 'ברכיים', ankles: 'קרסוליים' };
-    const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); const t0 = tilt(L(i), L(j)), p0 = L(i), q0 = L(j), sl = (q0.y - p0.y) / ((q0.x - p0.x) || 1e-6), xe = W - 8; label(t0.toFixed(1) + '°', xe, p0.y + sl * (xe - p0.x), col[k], true); return t0.toFixed(1) + '°'; };
+    const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); const t0 = tilt(L(i), L(j)), p0 = L(i), q0 = L(j), sl = (q0.y - p0.y) / ((q0.x - p0.x) || 1e-6), xe = Math.min(W - 8, hp.x + 0.40 * hh); label(t0.toFixed(1) + '°', xe, p0.y + sl * (xe - p0.x), col[k], true); return t0.toFixed(1) + '°'; };
     const hh = Math.abs(floor.y - headTop.y) || 1;
     if (!side) {
       const t = { eyes: view === 'BACK' ? null : pair('eyes', 2, 5), shoulders: pair('shoulders', 11, 12), elbows: pair('elbows', 13, 14), hips: pair('hips', 23, 24), knees: pair('knees', 25, 26), ankles: pair('ankles', 27, 28) };
