@@ -193,7 +193,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 17:00</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 17:10</span></footer>
 </div>
 
 <script>
@@ -404,7 +404,6 @@ function howAt(toks, j) {
   if (/^[וב]?(?:עצב(?:ים|וב)?|עיצוב)$/.test(w)) return { id: 'R1', n: 1 };
   if (/^[וב]?(?:מקור|חיבור|אחיזה)$/.test(w)) return { id: 'R2', n: (n === 'וחיבור' || n === 'חיבור') ? 2 : 1 };
   if (/^[וב]?(?:איבר|אבר|איברים)$/.test(w)) return { id: 'R3', n: 1 };
-  if (/^[וב]?(?:נקודה|נקודות|נקודתי)$/.test(w)) return { id: 'R2', n: 1 };
   if (/^[וב]?(?:צלק\S*|הצלקת)$/.test(w)) return { id: 'R6', n: 1 };
   if (/^[וב]?(?:שיניים|שינים|שן|שיני)$/.test(w)) return { id: 'R7', n: 1 };
   return null;
