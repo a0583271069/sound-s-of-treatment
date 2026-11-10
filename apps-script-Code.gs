@@ -205,7 +205,7 @@ function doPost(e) {
 // Every treatment has one NEURO_RESULTS row per nerve test and one MUSCLE_RESULTS row per muscle (created by
 // generateRows_ below). A finding is written into those rows only after ALL of them exist in the Sheet.
 // Until then the finding stays in FINDINGS with an empty "applied" cell, and tick (every minute) tries again.
-var RES_OK = 'עובד', RES_BAD = 'לא עובד', FIX_YES = 'תוקן', FIX_NO = 'לא תוקן';
+var RES_OK = 'עובד', RES_BAD = 'לא עובד', FIX_YES = 'תוקן', FIX_NO = 'לא תוקן', RES_SKIP = 'לא נבדק';
 
 function stamp_() { return Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss'); }
 
@@ -268,6 +268,7 @@ function writePlan_(r, plan) {
     var row = Number(k), p = plan[k];
     ['right', 'left'].forEach(function (sd) {
       if (!p[sd]) return;
+      if (p[sd].res === RES_SKIP && idx['res_' + sd] && String(sh.getRange(row, idx['res_' + sd]).getValue()).trim() !== '') return; // "not examined" never overwrites a result already there
       if (idx['res_' + sd]) sh.getRange(row, idx['res_' + sd]).setValue(p[sd].res);
       if (idx['fix_' + sd]) sh.getRange(row, idx['fix_' + sd]).setValue(p[sd].fix);
       if (idx['how_' + sd]) sh.getRange(row, idx['how_' + sd]).setValue(p[sd].how);
@@ -308,7 +309,7 @@ function applyPending_(onlyTid) {
       if (!mid && mname === 'פיריפורמיס') mid = 'M23';
       var isM = !!mid;
       if (isM ? !mReady : !nReady) { waiting++; return; }
-      var res = result === 'ok' ? RES_OK : RES_BAD;
+      var res = result === 'ok' ? RES_OK : result === 'skip' ? RES_SKIP : RES_BAD;
       var fix = res === RES_BAD ? (fixed === 'fixed' ? FIX_YES : fixed === 'notfixed' ? FIX_NO : '') : '';
       var how = '';
       // reasons (R1..R7) go with a fixed muscle that did not work; "שיחררתי" (R9) goes with a muscle that works too strongly
@@ -320,7 +321,7 @@ function applyPending_(onlyTid) {
         var rr = rows[k];
         if (!rr) return;
         if (side) plan_(pl, rr.row, side, res, fix, true, how);
-        else if (res === RES_OK) { plan_(pl, rr.row, 'right', res, '', false); plan_(pl, rr.row, 'left', res, '', false); }
+        else if (res === RES_OK || res === RES_SKIP) { plan_(pl, rr.row, 'right', res, '', false); plan_(pl, rr.row, 'left', res, '', false); }
         else (pl[rr.row] || (pl[rr.row] = { notes: [] })).notes.push('⚠ הוכתב בלי צד: ' + phrase);
       });
       doneRows.push(i);

@@ -193,6 +193,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
       <strong id="resultTitle"></strong>
       <button class="primary" id="send" type="button">שלח לגיליון</button>
     </div>
+    <div id="missBox" hidden></div>
     <p class="small-note">אפשר להסיר ממצא שהוכר לא נכון לפני השליחה. הטקסט המלא נשלח ונשמר בכל מקרה.</p>
   </section>
   <div id="msg" aria-live="polite"></div>
@@ -203,7 +204,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 19:00</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 20:10</span></footer>
 </div>
 
 <script>
@@ -443,7 +444,7 @@ function markHow(list, key, ids) {
 
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
-  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0, pend = null, unclear = [];
+  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0, pend = null, unclear = [], unclearIds = [];
   // Talk with the patient must not become findings: a result (תקין / בסדר / לא עובד) counts only when a root, muscle, side or direction was said
   // since the last result, and not more than RELGAP words ago. Otherwise it is chat and is skipped (counted in out.ignored).
   var rootFresh = false, relAt = -99, RELGAP = 6, ignored = 0;
@@ -452,7 +453,7 @@ function parseMany(text) {
   var unknown = [], hl = null, headLimb = null; // names that could not be resolved; "C" / "L" and "hand" / "leg" said by a header ("יד ימין")
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
   // a muscle named but no result said about it before the next name / the end: yellow "!" (not saved, must be said again)
-  function closePend() { if (pend) { unclear.push(toks.slice(pend.a, pend.b + 1).join(' ')); spans.push({ a: pend.a, b: pend.b, k: 'unclear' }); pend = null; } }
+  function closePend() { if (pend) { unclearIds.push(pend.id); unclear.push(toks.slice(pend.a, pend.b + 1).join(' ')); spans.push({ a: pend.a, b: pend.b, k: 'unclear' }); pend = null; } }
   function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
   // a "hand right" header does not cover a leg root (L / S) and "leg left" does not cover a hand root (C / T)
   function rootSet(r) {
@@ -664,7 +665,7 @@ function parseMany(text) {
   out.unmatched = unmatched;
   out.orphans = orphans;
   out.unknown = unknown;
-  out.unclear = unclear;
+  out.unclear = unclear; out.unclearIds = unclearIds;
   out.ignored = ignored;
   out.spans = spans;
   out.toks = toks;
@@ -965,7 +966,9 @@ function analyze() {
   if (un.length) parts.push('תשובת "תוקן / לא תוקן" שלא נמצאה לה בעיה מתאימה: ' + un.length);
   $('notice').hidden = !parts.length; $('notice').textContent = parts.join('. ');
   paintText(all);
+  lastAll = all;
   renderFound();
+  renderMissing();
 }
 
 function renderFound() {
@@ -973,11 +976,11 @@ function renderFound() {
   $('resultBox').hidden = false;
   $('resultTitle').textContent = found.length ? 'זוהו ' + found.length + ' ממצאים' : 'לא זוהו ממצאים. הטקסט עדיין יישלח ויישמר.';
   found.forEach(function (f) {
-    var kind = f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
+    var kind = f.result === 'skip' ? 'unknown' : f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
     var c = el('div', 'card ' + kind);
     c.appendChild(el('div', 'root', f.muscle || f.root));
     var pills = el('div', 'pills');
-    pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : 'problem'), f.result === 'ok' ? 'תקין' : 'בעיה'));
+    pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : f.result === 'skip' ? 'neutral' : 'problem'), f.result === 'ok' ? 'תקין' : f.result === 'skip' ? 'לא נבדק' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
     if (f.answer === 'notfixed') pills.appendChild(el('span', 'pill notfixed', 'לא תוקן'));
     if (f.implied) pills.appendChild(el('span', 'pill neutral', 'לא נאמר "לא עובד", הוסק מ"תוקן"'));
@@ -990,10 +993,43 @@ function renderFound() {
     if (f.phrase) { var ph = el('div', null, f.phrase); ph.style.cssText = 'grid-column:1/-1;font-size:13px;color:var(--muted)'; c.appendChild(ph); }
     var marks = el('div', 'marks');
     var del = el('button', 'small', 'הסר'); del.type = 'button';
-    del.onclick = function () { found = found.filter(function (x) { return x !== f; }); renderFound(); };
+    del.onclick = function () { found = found.filter(function (x) { return x !== f; }); renderFound(); renderMissing(); };
     marks.appendChild(del); c.appendChild(marks);
     list.appendChild(c);
   });
+}
+// tests that were not said in this recording: mark them here (not examined / ok / problem on one side) instead of by hand in the app
+var lastAll = null;
+function heName(m) { var a = (m[2] || '').split('|').filter(function (x) { return /[\u0590-\u05ff]/.test(x); }); return a.length ? a[0] : ''; }
+function addMark(kind, id, isM, side) {
+  var f = { root: isM ? id : id, key: id, known: true, result: kind === 'skip' ? 'skip' : kind, side: side || '', dir: null, answer: null, phrase: 'סומן ידנית', g: 0 };
+  if (isM) { f.root = ''; f.muscle = MBY[id]; f.muscle_id = id; } else { f.muscle = ''; f.muscle_id = ''; }
+  found.push(f);
+}
+function renderMissing() {
+  var box = $('missBox'); box.textContent = '';
+  if (!lastAll) { box.hidden = true; return; }
+  var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
+  (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
+  var ms = MDB.filter(function (m) { return !have[m[0]]; }), ns = ROOTS.filter(function (r) { return !have[r]; });
+  if (!ms.length && !ns.length) { box.hidden = true; return; }
+  box.hidden = false;
+  var head = el('div', 'result-head'); head.appendChild(el('strong', null, 'לא נאמרו בהקלטה: ' + ms.length + ' שרירים, ' + ns.length + ' עצבים'));
+  var allb = el('button', 'small', 'סמן את כולם כלא נבדק'); allb.type = 'button';
+  allb.onclick = function () { ms.forEach(function (m) { addMark('skip', m[0], true); }); ns.forEach(function (r) { addMark('skip', r, false); }); renderFound(); renderMissing(); };
+  head.appendChild(allb); box.appendChild(head);
+  function row(label, id, isM) {
+    var c = el('div', 'card unknown'); c.appendChild(el('div', 'root', label));
+    var mk = el('div', 'marks');
+    [['לא נבדק', 'skip', ''], ['תקין', 'ok', ''], ['בעיה ימין', 'problem', 'right'], ['בעיה שמאל', 'problem', 'left']].forEach(function (b) {
+      var bt = el('button', 'small', b[0]); bt.type = 'button';
+      bt.onclick = function () { addMark(b[1], id, isM, b[2]); renderFound(); renderMissing(); };
+      mk.appendChild(bt);
+    });
+    c.appendChild(mk); box.appendChild(c);
+  }
+  ms.forEach(function (m) { row(m[0] + ' ' + (heName(m) || m[1]) + ' · ' + m[1], m[0], true); });
+  ns.forEach(function (r) { row('עצב ' + r, r, false); });
 }
 $('analyze').onclick = analyze;
 
@@ -1024,7 +1060,7 @@ $('send').onclick = function () {
           + (j.waiting > 0 ? ' השורות של הטיפול עוד לא הגיעו מהטאבלט לגיליון. הממצאים ייכנסו אליהן אוטומטית תוך כמה דקות, ואז לרענן את האפליקציה.'
             : j.done > 0 ? ' הממצאים נכתבו לשורות הטיפול. לרענן את האפליקציה כדי לראות אותם.' : '');
         said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); found = [];
-        $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true; $('colored').hidden = true; lastRec = ''; lastIgn = '';
+        lastAll = null; $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true; $('colored').hidden = true; lastRec = ''; lastIgn = '';
       } else {
         msg.className = 'errmsg';
         msg.textContent = 'השרת סירב: ' + ((j && j.error) || 'שגיאה לא ידועה') + '. הטקסט נשמר בטאבלט.';
