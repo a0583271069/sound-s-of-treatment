@@ -203,7 +203,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 19:40</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 19:00</span></footer>
 </div>
 
 <script>
@@ -443,7 +443,7 @@ function markHow(list, key, ids) {
 
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
-  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0, pend = null, unclear = [], numOnly = [], numConf = [], nameOnly = [];
+  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0, pend = null, unclear = [];
   // Talk with the patient must not become findings: a result (תקין / בסדר / לא עובד) counts only when a root, muscle, side or direction was said
   // since the last result, and not more than RELGAP words ago. Otherwise it is chat and is skipped (counted in out.ignored).
   var rootFresh = false, relAt = -99, RELGAP = 6, ignored = 0;
@@ -592,28 +592,11 @@ function parseMany(text) {
       var lt = hl || (root && !isMuscle(root) && !isUnk(root) ? root.charAt(0) : null);
       if (lt && ROOTS.indexOf(lt + w) >= 0) { flush(); rootSet(lt + w); continue; }
     }
-    // a muscle NUMBER read from the app list (1-56, number = muscle id): the number alone is enough when the name was not understood
-    if (/^\d{1,2}$/.test(w) && +w >= 1 && +w <= 56 && +w !== 26 && !NOTROOTNEXT.test(nx)) {
-      var nid = 'M' + (w.length < 2 ? '0' : '') + w, k2, hasRes = false, nOther = null, nSame = false, m2;
-      for (k2 = i + 1; k2 <= i + 5 && k2 < toks.length; k2++) {
-        if (/^\d{1,2}$/.test(toks[k2])) break;
-        m2 = findMuscle(toks, k2);
-        if (m2) { if (m2.id === nid) nSame = true; else nOther = m2; break; }
-        if (OKW.test(toks[k2]) || BADW.test(toks[k2]) || FIXW.test(toks[k2]) || toks[k2] === 'לא') { hasRes = true; break; }
-      }
-      if (MBY[nid] && !nSame && (hasRes || nOther)) {
-        if (nOther) numConf.push(nid + ' (' + toks.slice(k2, k2 + nOther.n).join(' ') + ')'); else numOnly.push(nid);
-        closePend(); flush(); if (root && !isMuscle(root)) sticky = null;
-        root = nid; rootAt = i; hl = null; rootFresh = true; relAt = i; mark(i); pend = { a: i, b: i, id: nid };
-        if (nOther) { relAt = k2 + nOther.n - 1; pend.b = relAt; i = relAt; }
-        continue;
-      }
-    }
     var mm = findMuscle(toks, i);
     if (mm) {
       closePend(); flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
       root = mm.id; rootAt = i; hl = null; rootFresh = true; relAt = i + mm.n - 1; mark(i);
-      if (isMuscle(mm.id)) { pend = { a: i, b: i + mm.n - 1, id: mm.id }; if (!/^\d{1,2}$/.test(toks[i - 1] || '') && !/^\d{1,2}$/.test(toks[i - 2] || '')) nameOnly.push(mm.id); }
+      if (isMuscle(mm.id)) pend = { a: i, b: i + mm.n - 1, id: mm.id };
       if (isUnk(mm.id)) unknown.push(toks.slice(i, i + mm.n).join(' '));
       i += mm.n - 1; continue;
     }
@@ -682,7 +665,6 @@ function parseMany(text) {
   out.orphans = orphans;
   out.unknown = unknown;
   out.unclear = unclear;
-  out.numOnly = numOnly; out.numConf = numConf; out.nameOnly = nameOnly;
   out.ignored = ignored;
   out.spans = spans;
   out.toks = toks;
@@ -976,11 +958,6 @@ function analyze() {
   }).join(' · '));
   var ucl = all.unclear || [];
   if (ucl.length) parts.push('(!) שריר בלי תוצאה (לא נקלט, צריך לומר מה איתו): ' + ucl.join(' · '));
-  var nm = function (id) { return id + ' ' + (MBY[id] || ''); }, u2 = function (a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); };
-  var nOn = u2(all.numOnly || []), nCf = u2(all.numConf || []), nNm = u2(all.nameOnly || []);
-  if (nOn.length) parts.push('שרירים שזוהו לפי המספר בלבד (השם לא נשמע): ' + nOn.map(nm).join(' · '));
-  if (nCf.length) parts.push('המספר ניצח את השם (השם שנשמע היה אחר): ' + nCf.map(function (x) { return nm(x.split(' ')[0]) + ' ' + x.slice(x.indexOf(' ')); }).join(' · '));
-  if (nNm.length) parts.push('שרירים שזוהו לפי השם בלי מספר: ' + nNm.map(nm).join(' · '));
   var orp = all.orphans || [];
   if (orp.length) parts.push('תוצאה בלי שורש או שריר מזוהה (לא נקלטה): ' + orp.slice(0, 4).join(' · ') + (orp.length > 4 ? ' ועוד ' + (orp.length - 4) : ''));
   var nos = found.filter(function (f) { return f.result === 'problem' && !f.side; }).length;
