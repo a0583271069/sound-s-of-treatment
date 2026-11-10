@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 17:40</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 19:30</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -284,6 +284,17 @@ function paint(cv, im, lm, view0, isMain) {
     else { g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); }
     g.stroke();
   }
+  const placed = [];
+  function label(txt, x, y, c, right) {
+    const fs = Math.round(W / 38); g.font = 'bold ' + fs + 'px sans-serif';
+    const tw = g.measureText(txt).width, pw = fs * 0.35, bw = tw + pw * 2, bh = fs * 1.35;
+    let bx = right ? x - bw : x, by = y - bh / 2;
+    bx = Math.max(2, Math.min(W - bw - 2, bx)); by = Math.max(2, Math.min(H - bh - 2, by));
+    for (let n = 0; n < 40 && placed.some((r) => bx < r.x + r.w && bx + bw > r.x && by < r.y + r.h && by + bh > r.y); n++) by += bh + 2;
+    placed.push({ x: bx, y: by, w: bw, h: bh });
+    g.fillStyle = '#fff'; g.fillRect(bx, by, bw, bh); g.strokeStyle = c; g.lineWidth = Math.max(1.5, lw * 0.8); g.strokeRect(bx, by, bw, bh);
+    g.fillStyle = c; g.textBaseline = 'middle'; g.fillText(txt, bx + pw, by + bh / 2 + 1); g.textBaseline = 'alphabetic';
+  }
   function dot(p, c) { g.fillStyle = c; g.beginPath(); g.arc(p.x, p.y, lw * 2, 0, 7); g.fill(); }
   const warn = [];
   if (lm) {
@@ -306,7 +317,7 @@ function paint(cv, im, lm, view0, isMain) {
     }
     if (on.plumb) { g.strokeStyle = col.plumb; g.lineWidth = lw; g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); g.setLineDash([]); }
     const NAME = { eyes: 'עיניים', shoulders: 'כתפיים', elbows: 'מרפקים', hips: 'אגן', knees: 'ברכיים', ankles: 'קרסוליים' };
-    const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); return tilt(L(i), L(j)).toFixed(1) + '°'; };
+    const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); const t0 = tilt(L(i), L(j)), p0 = L(i), q0 = L(j), sl = (q0.y - p0.y) / ((q0.x - p0.x) || 1e-6), xe = W - 8; label(t0.toFixed(1) + '°', xe, p0.y + sl * (xe - p0.x), col[k], true); return t0.toFixed(1) + '°'; };
     const hh = Math.abs(floor.y - headTop.y) || 1;
     if (!side) {
       const t = { eyes: view === 'BACK' ? null : pair('eyes', 2, 5), shoulders: pair('shoulders', 11, 12), elbows: pair('elbows', 13, 14), hips: pair('hips', 23, 24), knees: pair('knees', 25, 26), ankles: pair('ankles', 27, 28) };
@@ -328,10 +339,11 @@ function paint(cv, im, lm, view0, isMain) {
       out.push(ex.join(' · '));
       const hl = (q, k) => { if (!on[k]) return; if (!good(q)) { warn.push(NAME[k]); return; } seg({ x: q.x - W / 6, y: q.y }, { x: q.x + W / 6, y: q.y }, k, false); };
       hl(K, 'knees'); hl(Hp, 'hips'); hl(S, 'shoulders'); hl(A, 'ankles');
-      if (on.elbows && good(S, el, wr)) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); }
+      if (on.elbows && good(S, el, wr)) { seg(S, el, 'elbows', false); seg(el, wr, 'elbows', false); label(angle3(S, el, wr).toFixed(0) + '°', el.x + facing * -lw * 8, el.y, col.elbows, facing > 0); }
+      if (on.knees && good(Hp, K, A)) label(angle3(Hp, K, A).toFixed(0) + '°', K.x + facing * lw * 8, K.y, col.knees, facing < 0);
       if (on.eyes && good(eye, E)) {
         seg(eye, E, 'eyes', false);
-        g.fillStyle = col.eyes; g.font = Math.round(W / 32) + 'px sans-serif'; g.fillText(((Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI).toFixed(0) + '°', (eye.x + E.x) / 2 + lw * 6, (eye.y + E.y) / 2 - lw * 6);
+        label(((Math.atan2(-(eye.y - E.y), (eye.x - E.x) * facing) * 180) / Math.PI).toFixed(0) + '°', (eye.x + E.x) / 2 + facing * lw * 8, (eye.y + E.y) / 2 - lw * 8, col.eyes, facing < 0);
       }
     }
     if (warn.length) out.push('<span class="err">לא מספיק ברור בתמונה (לא צויר): ' + warn.join(', ') + '. אפשר לתקן בעריכת נקודות.</span>');
