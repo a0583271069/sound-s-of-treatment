@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 09/11 20:30</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 16:10</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -263,6 +263,9 @@ function angle3(a, b, c) {
 function fixEar(arr) {
   if (!arr) return arr;
   [[7, 2], [8, 5]].forEach(([e, y]) => { const d = Math.hypot(arr[e].x - arr[y].x, arr[e].y - arr[y].y); arr[e].y -= 0.28 * d; });
+  // side view: move the ear points further back (from the sideburn to the ear canal / tragus), away from the nose
+  const sw = Math.abs(arr[11].x - arr[12].x), tl = Math.hypot((arr[11].x + arr[12].x) / 2 - (arr[23].x + arr[24].x) / 2, (arr[11].y + arr[12].y) / 2 - (arr[23].y + arr[24].y) / 2) || 1;
+  if (sw < 0.45 * tl) [7, 8].forEach((e) => { const dx = arr[e].x - arr[0].x; arr[e].x += 0.3 * dx; });
   return arr;
 }
 function paint(cv, im, lm, view0, isMain) {
