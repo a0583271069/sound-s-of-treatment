@@ -193,7 +193,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 09/11/2026</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 10/11/2026 17:00</span></footer>
 </div>
 
 <script>
@@ -371,7 +371,7 @@ function normalize(t) {
 function has(re, s) { return re.test(' ' + s + ' '); }
 
 // Several findings in one dictation: "c2 עובד c3 תקין c6 שמאל לא עובד תוקן ימין עובד"
-var OKW = /^(?:תקי[נן]\S*|עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה)$/;
+var OKW = /^(?:תקי[נן]\S*|עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה|טוב|סופר|יופי|מושלם|נהדר)$/;
 var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
 var FIXW = /^(?:מ?תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
 // "מימין" / "משמאל" (on the right / on the left) are said as often as "ימין" / "שמאל"
@@ -404,6 +404,7 @@ function howAt(toks, j) {
   if (/^[וב]?(?:עצב(?:ים|וב)?|עיצוב)$/.test(w)) return { id: 'R1', n: 1 };
   if (/^[וב]?(?:מקור|חיבור|אחיזה)$/.test(w)) return { id: 'R2', n: (n === 'וחיבור' || n === 'חיבור') ? 2 : 1 };
   if (/^[וב]?(?:איבר|אבר|איברים)$/.test(w)) return { id: 'R3', n: 1 };
+  if (/^[וב]?(?:נקודה|נקודות|נקודתי)$/.test(w)) return { id: 'R2', n: 1 };
   if (/^[וב]?(?:צלק\S*|הצלקת)$/.test(w)) return { id: 'R6', n: 1 };
   if (/^[וב]?(?:שיניים|שינים|שן|שיני)$/.test(w)) return { id: 'R7', n: 1 };
   return null;
@@ -433,7 +434,7 @@ function markHow(list, key, ids) {
 
 function parseMany(text) {
   var toks = normalize(text).split(' ').filter(Boolean);
-  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0;
+  var out = [], root = null, dirs = [], sides = [], sticky = null, unmatched = [], dangling = [], orphans = [], lastEmit = -99, allDirs = false, gid = 0, pend = null, unclear = [];
   // Talk with the patient must not become findings: a result (תקין / בסדר / לא עובד) counts only when a root, muscle, side or direction was said
   // since the last result, and not more than RELGAP words ago. Otherwise it is chat and is skipped (counted in out.ignored).
   var rootFresh = false, relAt = -99, RELGAP = 6, ignored = 0;
@@ -441,12 +442,14 @@ function parseMany(text) {
   function mark(k) { if (blockStart < 0) blockStart = k; }
   var unknown = [], hl = null, headLimb = null; // names that could not be resolved; "C" / "L" and "hand" / "leg" said by a header ("יד ימין")
   var rootAt = 0, lastEnd = -1; // token positions, used to cut out the phrase each finding came from
+  // a muscle named but no result said about it before the next name / the end: yellow "!" (not saved, must be said again)
+  function closePend() { if (pend) { unclear.push(toks.slice(pend.a, pend.b + 1).join(' ')); spans.push({ a: pend.a, b: pend.b, k: 'unclear' }); pend = null; } }
   function uniq(a) { return a.filter(function (d, i) { return a.indexOf(d) === i; }); }
   // a "hand right" header does not cover a leg root (L / S) and "leg left" does not cover a hand root (C / T)
   function rootSet(r) {
     if (isMuscle(root)) sticky = null; // a nerve root after the muscle block: the side header is over
     else if (sticky && headLimb && headLimb !== (/^[CT]/.test(r) ? 'hand' : 'leg')) sticky = null;
-    root = r; rootAt = i; hl = null; rootFresh = true; relAt = i; mark(i);
+    closePend(); root = r; rootAt = i; hl = null; rootFresh = true; relAt = i; mark(i);
   }
   function mk(result, d, sd, phrase, g) {
     var m = isMuscle(root);
@@ -479,11 +482,16 @@ function parseMany(text) {
         sidesFor(d, ex).forEach(function (sd) { out.push(mk(result, d, sd, phrase, gid)); });
       });
       spans.push({ a: blockStart >= 0 ? blockStart : at, b: to, k: result }); blockStart = -1;
-      lastEmit = at; lastEnd = to; rootFresh = false;
+      lastEmit = at; lastEnd = to; rootFresh = false; pend = null;
     } else if (!root) {
       orphans.push(toks.slice(Math.max(0, at - 4), to + 1).join(' '));
     } // a root that was heard but not resolved is reported once, under "unknown"
     dirs = []; sides = []; allDirs = false;
+  }
+  function hasOpen() {
+    var want = uniq(sides.concat(sticky ? [sticky] : [])), k, f;
+    for (k = out.length - 1; k >= 0; k--) { f = out[k]; if (f.key === root && f.result === 'problem' && !f.answer && (!want.length || !f.side || want.indexOf(f.side) >= 0)) return true; }
+    return false;
   }
   function flush() {
     if (root && !isUnk(root) && (dirs.length || sides.length)) dangling.push({ root: root, dirs: dirs.slice(), sides: sides.slice() });
@@ -493,7 +501,7 @@ function parseMany(text) {
   // which one. Said twice ("מתוקן ... תוקן"), the second time is ignored. With no "לא עובד" before it at all
   // ("סקלני ימין תוקן"), a fix means there was a problem, so the problem is added already answered.
   function answerLast(ans, at, end, how) {
-    spans.push({ a: at, b: end, k: ans === 'fixed' ? 'fixed' : 'problem' });
+    pend = null; spans.push({ a: at, b: end, k: ans === 'fixed' ? 'fixed' : 'problem' });
     var want = uniq(sides.concat(dirs.indexOf('bendR') >= 0 ? ['right'] : [], dirs.indexOf('bendL') >= 0 ? ['left'] : []));
     var cand = null, pass, k, f;
     function sideOk(x) { return !want.length || !x.side || want.indexOf(x.side) >= 0; }
@@ -562,7 +570,7 @@ function parseMany(text) {
     });
     root = saveRoot;
     spans.push({ a: blockStart >= 0 ? blockStart : Math.max(0, i - 2), b: i, k: 'ok' }); blockStart = -1;
-    lastEmit = i; lastEnd = i; rootFresh = false; dirs = []; sides = []; allDirs = false;
+    pend = null; lastEmit = i; lastEnd = i; rootFresh = false; dirs = []; sides = []; allDirs = false;
     return true;
   }
   for (var i = 0; i < toks.length; i++) {
@@ -570,15 +578,16 @@ function parseMany(text) {
     var rm = /^([LCST])(\d)$/i.exec(w);
     if (rm) { flush(); rootSet(rm[1].toUpperCase() + rm[2]); continue; }
     // "c68", "l55": a root with too many digits. Not guessed: whatever follows is reported, not given to the root before it
-    if (/^[LCST]\d{2,}$/i.test(w)) { flush(); if (isMuscle(root)) sticky = null; root = 'X0'; rootAt = i; hl = null; unknown.push(w); continue; }
+    if (/^[LCST]\d{2,}$/i.test(w)) { closePend(); flush(); if (isMuscle(root)) sticky = null; root = 'X0'; rootAt = i; hl = null; unknown.push(w); continue; }
     if (/^[1-9]$/.test(w) && !NOTROOTNEXT.test(nx) && !NOTROOTPREV.test(pv)) {
       var lt = hl || (root && !isMuscle(root) && !isUnk(root) ? root.charAt(0) : null);
       if (lt && ROOTS.indexOf(lt + w) >= 0) { flush(); rootSet(lt + w); continue; }
     }
     var mm = findMuscle(toks, i);
     if (mm) {
-      flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
+      closePend(); flush(); if (root && !isMuscle(root)) sticky = null; // the "hand/leg + side" header ends when the nerve block turns into the muscle block
       root = mm.id; rootAt = i; hl = null; rootFresh = true; relAt = i + mm.n - 1; mark(i);
+      if (isMuscle(mm.id)) pend = { a: i, b: i + mm.n - 1, id: mm.id };
       if (isUnk(mm.id)) unknown.push(toks.slice(i, i + mm.n).join(' '));
       i += mm.n - 1; continue;
     }
@@ -587,7 +596,12 @@ function parseMany(text) {
     if (FIXW.test(w)) { var hw = howAfter(toks, i); answerLast('fixed', i, hw.end, hw.ids); i = hw.end; continue; }
     if (w === 'לא' && (OKW.test(nx) || nx === 'טוב')) { emit('problem', i, i + 1); i++; continue; }
     if (BADW.test(w)) { emit('problem', i); continue; }
-    if (OKW.test(w)) { if (allOk(i)) continue; emit('ok', i); continue; }
+    if (OKW.test(w)) {
+      if (allOk(i)) continue;
+      // a muscle with an open problem said again with any "ok" word: the problem was fixed (with the "how" words after it, if any)
+      if (isMuscle(root) && i - relAt <= RELGAP && hasOpen()) { var hw2 = howAfter(toks, i); answerLast('fixed', i, hw2.end, hw2.ids); i = hw2.end; continue; }
+      emit('ok', i); continue;
+    }
     if (/^ה?כיוונים$/.test(w)) {
       var prev = out[out.length - 1];
       if (prev && prev.key === root && prev.dir === null && i - lastEmit <= 3) {
@@ -623,13 +637,13 @@ function parseMany(text) {
       if (SIDEHEAD.test(pv) || /^(?:2|שני|שני\S*)$/.test(pv)) sticky = null;
       sides.push('right', 'left'); relAt = i; mark(i); continue;
     }
-    if (BLOCKW.test(w)) { flush(); root = null; sticky = null; hl = null; continue; }
+    if (BLOCKW.test(w)) { closePend(); flush(); root = null; sticky = null; hl = null; continue; }
     if (/^אחור\S*$/.test(w)) { dirs.push('back'); relAt = i; mark(i); }
     else if (/^(?:קדימה|קדמי\S*|קדימי\S*)$/.test(w)) { dirs.push('fwd'); relAt = i; mark(i); }
     else if (w === 'ימינה') { dirs.push('bendR'); relAt = i; mark(i); }
     else if (w === 'שמאלה') { dirs.push('bendL'); relAt = i; mark(i); }
   }
-  flush();
+  closePend(); flush();
   // "ימין לא עובד" said with no name, then at once the same side + problem with a named muscle ("פירי פורמס ימין לא עובד"):
   // the first was the start of that muscle (the recognizer dropped its name), not a finding of the nerve root before it
   for (var q = out.length - 2; q >= 0; q--) {
@@ -641,6 +655,7 @@ function parseMany(text) {
   out.unmatched = unmatched;
   out.orphans = orphans;
   out.unknown = unknown;
+  out.unclear = unclear;
   out.ignored = ignored;
   out.spans = spans;
   out.toks = toks;
@@ -870,6 +885,7 @@ function paintText(all) {
     if (c === 'ok') { sp.style.color = 'var(--ok)'; rec.push(w); flush(); }
     else if (c === 'problem') { sp.style.color = 'var(--bad)'; rec.push(w); flush(); }
     else if (c === 'fixed') { sp.style.color = 'var(--fix)'; rec.push(w); flush(); }
+    else if (c === 'unclear') { sp.style.color = '#d99a00'; sp.style.fontWeight = '700'; sp.textContent = w + '(!) '; rec.push(w); flush(); }
     else run.push(w);
     box.appendChild(sp);
   });
@@ -899,6 +915,8 @@ function analyze() {
   if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
     return (isMuscle(d.root) ? MBY[d.root] : d.root) + ' ' + d.sides.map(function (x) { return SIDES[x]; }).concat(d.dirs.map(function (x) { return DIRS[x]; })).join(' ');
   }).join(' · '));
+  var ucl = all.unclear || [];
+  if (ucl.length) parts.push('(!) שריר בלי תוצאה (לא נקלט, צריך לומר מה איתו): ' + ucl.join(' · '));
   var orp = all.orphans || [];
   if (orp.length) parts.push('תוצאה בלי שורש או שריר מזוהה (לא נקלטה): ' + orp.slice(0, 4).join(' · ') + (orp.length > 4 ? ' ועוד ' + (orp.length - 4) : ''));
   var nos = found.filter(function (f) { return f.result === 'problem' && !f.side; }).length;
