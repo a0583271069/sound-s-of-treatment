@@ -75,6 +75,57 @@ function photo_(file) {
   return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
 }
 
+// ---- complaint / change + pain scale: two extra columns at the end of TREATMENTS (added automatically) --------------
+var T_EXTRA = ['COMPLAINT_CHANGE', 'PAIN_BEFORE'];
+function ensureTreatmentCols_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+  if (!sh) return;
+  var last = Math.max(1, sh.getLastColumn()), h = sh.getRange(1, 1, 1, last).getValues()[0].map(function (x) { return String(x).trim(); });
+  T_EXTRA.forEach(function (c) {
+    if (h.indexOf(c) < 0) { sh.getRange(1, h.length + 1).setValue(c); h.push(c); }
+  });
+}
+
+// ---- the previous treatment of the same patient: what is still open (red) and what was fixed (purple) ------------
+function prevData_(tid) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName('TREATMENTS');
+  if (!sh || sh.getLastRow() < 2 || !tid) return { ok: true, items: [] };
+  var v = sh.getDataRange().getDisplayValues(), h = v[0].map(function (x) { return String(x).trim(); });
+  var ci = h.indexOf('Treatment_ID'), pi = h.indexOf('PATIENT_ID'), ni = h.indexOf('TREATMENT_NUMBER');
+  var cc = h.indexOf('COMPLAINT_CHANGE'), pb = h.indexOf('PAIN_BEFORE');
+  var cur = null, rows = [];
+  for (var i = 1; i < v.length; i++) {
+    var r = v[i];
+    if (String(r[ci]).trim() === tid) cur = r;
+    rows.push(r);
+  }
+  if (!cur) return { ok: true, items: [] };
+  var pat = String(cur[pi]).trim(), num = Number(cur[ni]) || 0, best = null;
+  rows.forEach(function (r) {
+    if (String(r[pi]).trim() !== pat || String(r[ci]).trim() === tid) return;
+    var n = Number(r[ni]) || 0;
+    if (n < num && (!best || n > (Number(best[ni]) || 0))) best = r;
+  });
+  if (!best) return { ok: true, items: [], number: 0 };
+  var ptid = String(best[ci]).trim(), items = [], CORR = correctionNames_();
+  function scan(name, keyCol, kind, hasHow) {
+    var sh2 = ss.getSheetByName(name);
+    if (!sh2 || sh2.getLastRow() < 2) return;
+    var d = sh2.getDataRange().getValues(), ix = headIdx_(sh2);
+    for (var j = 1; j < d.length; j++) {
+      if (String(d[j][ix.Treatment_ID - 1]).trim() !== ptid) continue;
+      ['right', 'left'].forEach(function (sd) {
+        var res = String(d[j][ix['res_' + sd] - 1] || ''), fix = String(d[j][ix['fix_' + sd] - 1] || ''), how = hasHow ? String(d[j][ix['how_' + sd] - 1] || '') : '';
+        if (res !== RES_BAD) return;
+        items.push({ kind: kind, id: String(d[j][ix[keyCol] - 1]).trim(), side: sd, state: fix === FIX_YES ? 'fixed' : 'open', how: how });
+      });
+    }
+  }
+  scan('MUSCLE_RESULTS', 'muscle_id', 'M', true);
+  scan('NEURO_RESULTS', 'test_id', 'N', false);
+  return { ok: true, number: Number(best[ni]) || 0, complaint: cc >= 0 ? String(best[cc]) : '', pain: pb >= 0 ? String(best[pb]) : '', items: items };
+}
+
 function doGet() { return out_({ ok: true, service: 'clinic-dictation' }); }
 
 function doPost(e) {
@@ -85,6 +136,7 @@ function doPost(e) {
     var pw = PropertiesService.getScriptProperties().getProperty('PASSWORD');
     if (!pw || String(d.pw) !== pw) return out_({ ok: false, error: 'סיסמה שגויה' });
     if (d.action === 'list') return out_(listData_());
+    if (d.action === 'prev') return out_(prevData_(String(d.treatment_id || '').trim()));
     if (d.action === 'photo') return out_(photo_(String(d.file || '')));
     var session = String(d.session || '');
     if (!session) return out_({ ok: false, error: 'חסר מזהה' });
@@ -453,6 +505,7 @@ function tick() {
   try {
     guard_('tick', function () {
       if (idle_()) return;
+      ensureTreatmentCols_();
       backfillPatients_();
       generateRows_();
       applyPending_('');
