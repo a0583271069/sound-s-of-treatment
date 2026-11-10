@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 17:20</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 10/11 17:40</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -262,10 +262,15 @@ function angle3(a, b, c) {
 // the detector puts the ear point at the ear canal; the clinic rule is "top of the ear level with the eye", so the points are lifted a little (can be dragged afterwards)
 function fixEar(arr) {
   if (!arr) return arr;
-  [[7, 2], [8, 5]].forEach(([e, y]) => { const d = Math.hypot(arr[e].x - arr[y].x, arr[e].y - arr[y].y); arr[e].y -= 0.10 * d; });
-  // side view: move the ear points further back (from the sideburn to the ear canal / tragus), away from the nose
+  // side view: the detector puts the ear point at the sideburn; measured on real photos, the ear canal is about 0.62 x (eye-to-point distance)
+  // behind it (away from the nose) and about 0.1 x lower. Front / back view: the point is lifted a little (top of the ear level with the eye).
   const sw = Math.abs(arr[11].x - arr[12].x), tl = Math.hypot((arr[11].x + arr[12].x) / 2 - (arr[23].x + arr[24].x) / 2, (arr[11].y + arr[12].y) / 2 - (arr[23].y + arr[24].y) / 2) || 1;
-  if (sw < 0.45 * tl) [7, 8].forEach((e) => { const dx = arr[e].x - arr[0].x; arr[e].x += 0.3 * dx; });
+  const side = sw < 0.45 * tl;
+  [[7, 2], [8, 5]].forEach(([e, y]) => {
+    const d = Math.hypot(arr[e].x - arr[y].x, arr[e].y - arr[y].y);
+    if (side) { const dir = Math.sign(arr[e].x - arr[0].x) || 1; arr[e].x += dir * 0.62 * d; arr[e].y += 0.10 * d; }
+    else arr[e].y -= 0.28 * d;
+  });
   return arr;
 }
 function paint(cv, im, lm, view0, isMain) {
