@@ -969,6 +969,7 @@ function analyze() {
   lastAll = all;
   renderFound();
   renderMissing();
+  showMissModal(null);
 }
 
 function renderFound() {
@@ -1033,10 +1034,38 @@ function renderMissing() {
 }
 $('analyze').onclick = analyze;
 
+// pop-up: tests that were NOT said and not marked yet. Shown after the analysis and again before sending.
+function missingNow() {
+  if (!lastAll) return { ms: [], ns: [] };
+  var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
+  (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
+  return { ms: MDB.filter(function (m) { return !have[m[0]]; }), ns: ROOTS.filter(function (r) { return !have[r]; }) };
+}
+function showMissModal(onSend) {
+  var old = $('missModal'); if (old) old.remove();
+  var r = missingNow();
+  if (!r.ms.length && !r.ns.length) { if (onSend) onSend(); return; }
+  var ov = el('div', null); ov.id = 'missModal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:12px';
+  var bx = el('div', null);
+  bx.style.cssText = 'background:#fff;color:#111;border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;direction:rtl;box-shadow:0 8px 30px rgba(0,0,0,.4)';
+  var h = el('div', null, 'שים לב: לא נאמרו בהקלטה ' + r.ms.length + ' שרירים ו-' + r.ns.length + ' עצבים');
+  h.style.cssText = 'font-weight:700;font-size:1.15em;padding:14px 16px;border-bottom:1px solid #ddd';
+  var ls = el('div', null); ls.style.cssText = 'overflow:auto;padding:10px 16px;line-height:1.7';
+  r.ms.forEach(function (m) { ls.appendChild(el('div', null, '• ' + m[0] + ' ' + (heName(m) || m[1]))); });
+  r.ns.forEach(function (n) { ls.appendChild(el('div', null, '• עצב ' + n)); });
+  var ft = el('div', null); ft.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid #ddd';
+  var b1 = el('button', null, 'חזרה לסימון'); b1.type = 'button';
+  b1.onclick = function () { ov.remove(); var mb = $('missBox'); if (mb && !mb.hidden) mb.scrollIntoView({ behavior: 'smooth' }); };
+  ft.appendChild(b1);
+  if (onSend) { var b2 = el('button', null, 'שלח בכל זאת (נשארים ריקים)'); b2.type = 'button'; b2.onclick = function () { ov.remove(); onSend(); }; ft.appendChild(b2); }
+  bx.appendChild(h); bx.appendChild(ls); bx.appendChild(ft); ov.appendChild(bx); document.body.appendChild(ov);
+}
+
 // ---- send ------------------------------------------------------------------
 function newId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
-$('send').onclick = function () {
+function doSend() {
   var c = {}; try { c = JSON.parse(lsGet(CFG) || '{}') || {}; } catch (e) {}
   var msg = $('msg'); msg.className = ''; msg.textContent = '';
   if (!c.url || !c.pw) { $('settings').open = true; msg.className = 'errmsg'; msg.textContent = 'חסרות כתובת וסיסמה בהגדרות.'; return; }
@@ -1071,7 +1100,8 @@ $('send').onclick = function () {
       msg.textContent = 'השליחה נכשלה (אין חיבור או כתובת שגויה). הטקסט נשמר בטאבלט, אפשר ללחוץ שוב.';
     })
     .then(function () { btn.disabled = false; btn.textContent = 'שלח לגיליון'; });
-};
+}
+$('send').onclick = function () { showMissModal(doSend); };
 </script>
 </body>
 </html>
