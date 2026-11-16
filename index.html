@@ -979,7 +979,7 @@ function renderFound() {
   found.forEach(function (f) {
     var kind = f.result === 'skip' ? 'unknown' : f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
     var c = el('div', 'card ' + kind);
-    c.appendChild(el('div', 'root', f.muscle || f.root));
+    c.appendChild(el('div', 'root', (f.muscle_id && numOf(f.muscle_id) ? numOf(f.muscle_id) + ' ' : '') + (f.muscle || f.root)));
     var pills = el('div', 'pills');
     pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : f.result === 'skip' ? 'neutral' : 'problem'), f.result === 'ok' ? 'תקין' : f.result === 'skip' ? 'לא נבדק' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
@@ -1007,12 +1007,16 @@ function addMark(kind, id, isM, side) {
   if (isM) { f.root = ''; f.muscle = MBY[id]; f.muscle_id = id; } else { f.muscle = ''; f.muscle_id = ''; }
   found.push(f);
 }
+// the examination order of the muscles (as in the MUSCLES sheet) and its number 01-55; the number is only a label to find a muscle in the list
+var MORDER = ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23", "M24", "M25", "M27", "M28", "M29", "M30", "M31", "M32", "M33", "M34", "M56", "M35", "M36", "M37", "M38", "M39", "M40", "M41", "M42", "M43", "M44", "M45", "M46", "M47", "M48", "M49", "M50", "M51", "M52", "M53", "M54", "M55"];
+function numOf(id) { var i = MORDER.indexOf(id); return i < 0 ? '' : (i < 9 ? '0' : '') + (i + 1); }
+function byOrder(a, b) { var x = MORDER.indexOf(a[0]), y = MORDER.indexOf(b[0]); return (x < 0 ? 999 : x) - (y < 0 ? 999 : y); }
 function renderMissing() {
   var box = $('missBox'); box.textContent = '';
   if (!lastAll) { box.hidden = true; return; }
   var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
   (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
-  var ms = MDB.filter(function (m) { return !have[m[0]]; }), ns = ROOTS.filter(function (r) { return !have[r]; });
+  var ms = MDB.filter(function (m) { return !have[m[0]]; }).sort(byOrder), ns = ROOTS.filter(function (r) { return !have[r]; });
   if (!ms.length && !ns.length) { box.hidden = true; return; }
   box.hidden = false;
   var head = el('div', 'result-head'); head.appendChild(el('strong', null, 'לא נאמרו בהקלטה: ' + ms.length + ' שרירים, ' + ns.length + ' עצבים'));
@@ -1029,7 +1033,7 @@ function renderMissing() {
     });
     c.appendChild(mk); box.appendChild(c);
   }
-  ms.forEach(function (m) { row(m[0] + ' ' + (heName(m) || m[1]) + ' · ' + m[1], m[0], true); });
+  ms.forEach(function (m) { row(numOf(m[0]) + ' ' + (heName(m) || m[1]) + ' · ' + m[1], m[0], true); });
   ns.forEach(function (r) { row('עצב ' + r, r, false); });
 }
 $('analyze').onclick = analyze;
@@ -1039,7 +1043,7 @@ function missingNow() {
   if (!lastAll) return { ms: [], ns: [] };
   var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
   (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
-  return { ms: MDB.filter(function (m) { return !have[m[0]]; }), ns: ROOTS.filter(function (r) { return !have[r]; }) };
+  return { ms: MDB.filter(function (m) { return !have[m[0]]; }).sort(byOrder), ns: ROOTS.filter(function (r) { return !have[r]; }) };
 }
 function showMissModal(onSend) {
   var old = $('missModal'); if (old) old.remove();
@@ -1052,7 +1056,7 @@ function showMissModal(onSend) {
   var h = el('div', null, 'שים לב: לא נאמרו בהקלטה ' + r.ms.length + ' שרירים ו-' + r.ns.length + ' עצבים');
   h.style.cssText = 'font-weight:700;font-size:1.15em;padding:14px 16px;border-bottom:1px solid #ddd';
   var ls = el('div', null); ls.style.cssText = 'overflow:auto;padding:10px 16px;line-height:1.7';
-  r.ms.forEach(function (m) { ls.appendChild(el('div', null, '• ' + m[0] + ' ' + (heName(m) || m[1]))); });
+  r.ms.forEach(function (m) { ls.appendChild(el('div', null, '• ' + numOf(m[0]) + ' ' + (heName(m) || m[1]))); });
   r.ns.forEach(function (n) { ls.appendChild(el('div', null, '• עצב ' + n)); });
   var ft = el('div', null); ft.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid #ddd';
   var b1 = el('button', null, 'חזרה לסימון'); b1.type = 'button';
