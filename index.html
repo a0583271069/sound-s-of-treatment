@@ -213,7 +213,7 @@ var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שת�
 var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','היה':'L','איך':'L','איל':'L','אייל':'L','סי':'C','סיי':'C','אס':'S','טי':'T','תהיה':'T'};
 var LETRE = Object.keys(LET).sort(function (a, b) { return b.length - a.length; }).join('|');
 // whole phrases the recognizer writes instead of a root ("קי אס ישיבה" is how Chrome heard C6)
-var PHRASEFIX = [[/(^|\s)קי\s+אס\s+ישיבה(?=\s|$)/g, '$1C6']];
+var PHRASEFIX = [[/(^|\s)קי\s+אס\s+ישיבה(?=\s|$)/g, '$1C6'], [/(^|\s)(?:איך|איל|אייל|אל)\s+ממש(?=\s|$)/g, '$1L5']]; // "איך ממש" = L5 (Chrome)
 // whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
 var ROOTWORD = {'68':'C8','ששמונה':'C8'};
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
@@ -386,7 +386,7 @@ var OKW = /^(?:תקי[נן]\S*|ש?עובד\S*|חזק\S*|בסדר|מצוין|מצ
 var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
 var FIXW = /^(?:מ?תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
 // "מימין" / "משמאל" (on the right / on the left) are said as often as "ימין" / "שמאל"
-var SIDER = /^[הבמ]?(?:ימין|ימנית)$/, SIDEL = /^[הבמ]?(?:שמאל|שמאלית)$/, SIDEBOTH = /^(?:ה?צדדים|שניהם|שניהן)$/;
+var SIDER = /^[הבמו]?(?:ימין|ימנית)$/, SIDEL = /^(?:[הבמו]?(?:שמאל|שמאלית)|וסול)$/, SIDEBOTH = /^(?:ה?צדדים|שניהם|שניהן)$/;
 var BLOCKW = /^(?:ה?שרירים|ה?עצבים)$/; // "muscles" / "nerves": a new block starts, the last root no longer applies
 var SIDEHEAD = /^(?:ה?יד|ה?רגל|ה?רגע|ב?צד)$/; // Chrome often writes "רגל" (leg) as "רגע" (a moment): "רגע ימין" = "רגל ימין"
 // a bare number ("שלוש ימינה לא עובד") continues the series of the last root (L5 -> L3) or the "hand / leg" said before it
@@ -556,6 +556,22 @@ function parseMany(text) {
     var roots = null, sidesList = null;
     if ((pv1 === 'כל' || ALLW.test(pv1)) && false) return false;
     if (NERVEW.test(pv1) && pv2 === 'כל' || ALLW.test(pv1) && NERVEW.test(pv2) || NERVEW.test(pv1) && ALLW.test(pv2)) { roots = ROOTS; sidesList = ['right', 'left']; }
+    else if (/^ה?שאר$/.test(pv1) && (pv2 === 'כל' || ALLW.test(pv2)) && sticky && headLimb && !isMuscle(root)) {
+      // "כל השאר תקין" after a nerve block with a hand / leg header: the rest of that limb's roots on that side are fine
+      roots = headLimb === 'hand' ? ['C5', 'C6', 'C7', 'C8', 'T1'] : ['L2', 'L3', 'L4', 'L5', 'S1', 'S2']; sidesList = [sticky];
+    } else if (/^ה?רגל$/.test(pv1) && (pv2 === 'כל' || pv2 === 'ה')) {
+      // muscles: "(צד שמאל) כל הרגל תקין": every leg muscle (M01-M24) not said on that side is fine
+      var sdl = SIDEL.test(pv3) ? 'left' : SIDER.test(pv3) ? 'right' : (sticky || null);
+      closePend(); flush();
+      var saveR = root, gl = ++gid;
+      MORDER.slice(0, 24).forEach(function (id) {
+        if (out.some(function (x) { return x.key === id && (!x.side || x.side === sdl); })) return;
+        root = id; out.push(mk('ok', null, sdl, toks.slice(Math.max(0, i - 3), i + 1).join(' '), gl));
+      });
+      root = saveR;
+      spans.push({ a: Math.max(0, i - 3), b: i, k: 'ok' }); blockStart = -1; pend = null; lastEmit = i; lastEnd = i; rootFresh = false; dirs = []; sides = []; allDirs = false;
+      return true;
+    }
     else if (ALLW.test(pv1)) {
       var sdp = SIDER.test(pv2) ? 'right' : SIDEL.test(pv2) ? 'left' : null;
       if (sdp && SIDEHEAD.test(pv3) && /^(?:ה?יד|ה?רגל|ה?רגע)$/.test(pv3)) {
