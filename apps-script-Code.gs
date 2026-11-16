@@ -472,6 +472,80 @@ function backfillPatients_() {
   return added;
 }
 
+// ---- Drive folders of the clinic -----------------------------------------------
+// One main folder with four folders inside, and under "patients" one folder per patient
+// (named by PATIENT_ID, never by name) with one folder per treatment inside it.
+// Nothing is ever moved or deleted here: folders are only created when they are missing.
+var CLINIC_ROOT = 'קליניקה - ניסים קטנים';
+var CLINIC_SUB = { app: 'אפליקציה', settings: 'הגדרות', sheets: 'טבלאות', patients: 'מטופלים' };
+
+function childFolder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+// the folder by its saved id; created (and saved) when it is missing or was trashed
+function savedFolder_(key, make) {
+  var p = PropertiesService.getScriptProperties(), id = p.getProperty(key), f = null;
+  if (id) { try { f = DriveApp.getFolderById(id); if (f.isTrashed()) f = null; } catch (e) { f = null; } }
+  if (!f) { f = make(); p.setProperty(key, f.getId()); }
+  return f;
+}
+
+function clinicRoot_() {
+  return savedFolder_('FOLDER_ROOT', function () {
+    var it = DriveApp.getRootFolder().getFoldersByName(CLINIC_ROOT);
+    return it.hasNext() ? it.next() : DriveApp.createFolder(CLINIC_ROOT);
+  });
+}
+
+function clinicFolders_() {
+  var root = clinicRoot_(), out = { root: root };
+  Object.keys(CLINIC_SUB).forEach(function (k) {
+    out[k] = savedFolder_('FOLDER_' + k.toUpperCase(), function () { return childFolder_(root, CLINIC_SUB[k]); });
+  });
+  return out;
+}
+
+// a folder for every treatment that does not have one yet; returns how many were created now
+function treatmentFolders_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var p = PropertiesService.getScriptProperties();
+  var done = String(p.getProperty('FOLDERS_DONE') || '').split(',').filter(String), have = {};
+  done.forEach(function (t) { have[t] = true; });
+  var v = sh.getDataRange().getValues(), h = v[0].map(function (x) { return String(x).trim(); });
+  var ci = h.indexOf('Treatment_ID'), pi = h.indexOf('PATIENT_ID'), ni = h.indexOf('TREATMENT_NUMBER'), di = h.indexOf('DATE');
+  if (ci < 0 || pi < 0) return 0;
+  var todo = [];
+  for (var i = 1; i < v.length; i++) {
+    var tid = String(v[i][ci]).trim(), pat = String(v[i][pi]).trim();
+    if (tid && pat && !have[tid]) todo.push(v[i]);
+  }
+  if (!todo.length) return 0;
+  var patients = clinicFolders_().patients, made = 0;
+  todo.forEach(function (r) {
+    var num = ni >= 0 ? Number(r[ni]) || 0 : 0, d = di >= 0 ? r[di] : '';
+    var day = Object.prototype.toString.call(d) === '[object Date]' ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd')
+      : (String(d).match(/^(\d{2})\/(\d{2})\/(\d{4})/) ? String(d).replace(/^(\d{2})\/(\d{2})\/(\d{4}).*$/, '$3-$2-$1') : '');
+    var name = 'טיפול ' + (num < 10 ? '0' : '') + num + (day ? ' - ' + day : '');
+    childFolder_(childFolder_(patients, String(r[pi]).trim()), name);
+    done.push(String(r[ci]).trim());
+    made++;
+  });
+  // a script property holds about 9,000 characters: keep the newest ids, an older one is only re-checked (never doubled)
+  while (done.join(',').length > 8000) done.shift();
+  p.setProperty('FOLDERS_DONE', done.join(','));
+  return made;
+}
+
+// RUN THIS ONCE by hand after pasting: creates the folders (it asks for Drive permission) and shows where they are.
+function installClinicFolders() {
+  var f = clinicFolders_(), n = treatmentFolders_();
+  status_('folders', true, '');
+  Logger.log(f.root.getUrl() + ' | treatment folders created now: ' + n);
+}
+
 // ---- every minute ------------------------------------------------------------
 // create the rows of new treatments, finish findings that were waiting for rows,
 // and pick up any patient the form trigger missed.
@@ -510,6 +584,8 @@ function tick() {
       backfillPatients_();
       generateRows_();
       applyPending_('');
+      // the folders must never stop the rest: a Drive error is only recorded on the STATUS sheet
+      try { treatmentFolders_(); status_('folders', true, ''); } catch (ef) { status_('folders', false, (ef && ef.stack) ? ef.stack : String(ef)); }
     });
   }
   finally { try { lock.releaseLock(); } catch (e) {} }
