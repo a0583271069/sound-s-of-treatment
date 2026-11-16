@@ -204,7 +204,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 16/11/2026 17:51</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 16/11/2026 18:07</span></footer>
 </div>
 
 <script>
@@ -213,7 +213,7 @@ var NUM = {'אחד':1,'אחת':1,'שניים':2,'שתיים':2,'שני':2,'שת�
 var LET = {'אל':'L','אלה':'L','יש':'L','אין':'L','היה':'L','איך':'L','איל':'L','אייל':'L','סי':'C','סיי':'C','אס':'S','טי':'T','תהיה':'T'};
 var LETRE = Object.keys(LET).sort(function (a, b) { return b.length - a.length; }).join('|');
 // whole phrases the recognizer writes instead of a root ("קי אס ישיבה" is how Chrome heard C6)
-var PHRASEFIX = [[/(^|\s)קי\s+אס\s+ישיבה(?=\s|$)/g, '$1C6'], [/(^|\s)(?:איך|איל|אייל|אל)\s+ממש(?=\s|$)/g, '$1L5'], [/(^|\s)(ה?(?:רגל|רגע))\s+(ימין|שמאל)\s+15(?=\s|$)/g, '$1$2 $3 L5']]; // "איך ממש" = L5 (Chrome)
+var PHRASEFIX = [[/(^|\s)קי\s+אס\s+ישיבה(?=\s|$)/g, '$1C6'], [/(^|\s)(?:איך|איל|אייל|אל)\s+ממש(?=\s|$)/g, '$1L5'], [/(^|\s)(ה?(?:רגל|רגע))\s+(ימין|שמאל)\s+15(?=\s|$)/g, '$1$2 $3 L5'], [/(^|\s)חוץ\s+מ?\s*([lcstLCST])\s*(\d)(?=\s|$)/g, '$1חוץ $2$3']]; // "איך ממש" = L5 (Chrome)
 // whole-word misheards of a root, seen in real dictation (Chrome heard "c8" as "68")
 var ROOTWORD = {'68':'C8','ששמונה':'C8'};
 var DIRS = {back:'אחורה', fwd:'קדימה', bendR:'הטיה ימינה', bendL:'הטיה שמאלה'};
@@ -587,6 +587,8 @@ function parseMany(text) {
       } else if (root && isMuscle(root) && rootFresh) { return false; } // a muscle said "הכל תקין": the plain "תקין" below handles it
       else return false;
     } else return false;
+    // "הכל תקין חוץ מ-S1": the named roots are left out (said next, with their own result)
+    if (toks[i + 1] === 'חוץ') { var ex = []; for (var q2 = i + 2; q2 < toks.length && /^[LCST]\d$/i.test(toks[q2]); q2++) ex.push(toks[q2].toUpperCase()); roots = roots.filter(function (r) { return ex.indexOf(r) < 0; }); }
     var DIRL = ['fwd', 'back', 'bendR', 'bendL'], saveRoot = root, added = 0;
     roots.forEach(function (r) {
       var rg = 0;
@@ -606,6 +608,7 @@ function parseMany(text) {
   }
   for (var i = 0; i < toks.length; i++) {
     var w = toks[i], nx = toks[i + 1] || '', pv = toks[i - 1] || '';
+    if (w === '15' && /^(?:ארו[כך]\S*|קצר\S*)$/.test(nx)) { flush(); rootSet('L5'); continue; } // Chrome writes "L5" as "15"; a muscle 15 is never followed by long / short
     var rm = /^([LCST])(\d)$/i.exec(w);
     if (rm) { flush(); rootSet(rm[1].toUpperCase() + rm[2]); continue; }
     // "c68", "l55": a root with too many digits. Not guessed: whatever follows is reported, not given to the root before it
