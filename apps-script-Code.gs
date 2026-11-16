@@ -507,6 +507,46 @@ function clinicFolders_() {
   return out;
 }
 
+// the folder of one treatment: patients / <PATIENT_ID> / "טיפול 01 - 2026-11-12" (created when missing)
+function treatFolder_(patients, pid, number, d) {
+  var num = Number(number) || 0;
+  var day = Object.prototype.toString.call(d) === '[object Date]' ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd')
+    : (String(d).match(/^(\d{2})\/(\d{2})\/(\d{4})/) ? String(d).replace(/^(\d{2})\/(\d{2})\/(\d{4}).*$/, '$3-$2-$1') : '');
+  var name = 'טיפול ' + (num < 10 ? '0' : '') + num + (day ? ' - ' + day : '');
+  return childFolder_(childFolder_(patients, pid), name);
+}
+
+// COPIES (never moves) the photos of the treatments into their treatment folder. AppSheet shows the photos from
+// its own folder, so the originals must stay where they are. A photo already copied is skipped, so running
+// this again changes nothing. days = only treatments of the last N days (0 = all); returns the copies made now.
+var PHOTO_COLS = ['PHOTO_FRONT', 'PHOTO_LEFT', 'PHOTO_BACK', 'PHOTO_RIGHT', 'AFTER_FRONT', 'AFTER_LEFT', 'AFTER_BACK', 'AFTER_RIGHT'];
+function copyPhotos_(days) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var v = sh.getDataRange().getValues(), h = v[0].map(function (x) { return String(x).trim(); });
+  var pi = h.indexOf('PATIENT_ID'), ni = h.indexOf('TREATMENT_NUMBER'), di = h.indexOf('DATE');
+  var cols = PHOTO_COLS.map(function (c) { return h.indexOf(c); }).filter(function (i) { return i >= 0; });
+  if (pi < 0 || !cols.length) return 0;
+  var patients = clinicFolders_().patients, made = 0, MAX = 40;
+  for (var i = v.length - 1; i >= 1 && made < MAX; i--) {
+    var pid = String(v[i][pi]).trim();
+    if (!pid) continue;
+    if (days > 0) { var t = parseStamp_(di >= 0 ? v[i][di] : ''); if (t && Date.now() - t > days * 86400000) continue; }
+    var dest = null;
+    for (var c = 0; c < cols.length && made < MAX; c++) {
+      var base = String(v[i][cols[c]]).split('/').pop().trim();
+      if (!base) continue;
+      if (!dest) dest = treatFolder_(patients, pid, ni >= 0 ? v[i][ni] : 0, di >= 0 ? v[i][di] : '');
+      if (dest.getFilesByName(base).hasNext()) continue;
+      var it = DriveApp.getFilesByName(base);
+      if (!it.hasNext()) continue; // the photo is not in Drive yet: tried again on a later run
+      it.next().makeCopy(base, dest);
+      made++;
+    }
+  }
+  return made;
+}
+
 // a folder for every treatment that does not have one yet; returns how many were created now
 function treatmentFolders_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
@@ -525,11 +565,7 @@ function treatmentFolders_() {
   if (!todo.length) return 0;
   var patients = clinicFolders_().patients, made = 0;
   todo.forEach(function (r) {
-    var num = ni >= 0 ? Number(r[ni]) || 0 : 0, d = di >= 0 ? r[di] : '';
-    var day = Object.prototype.toString.call(d) === '[object Date]' ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd')
-      : (String(d).match(/^(\d{2})\/(\d{2})\/(\d{4})/) ? String(d).replace(/^(\d{2})\/(\d{2})\/(\d{4}).*$/, '$3-$2-$1') : '');
-    var name = 'טיפול ' + (num < 10 ? '0' : '') + num + (day ? ' - ' + day : '');
-    childFolder_(childFolder_(patients, String(r[pi]).trim()), name);
+    treatFolder_(patients, String(r[pi]).trim(), ni >= 0 ? r[ni] : 0, di >= 0 ? r[di] : '');
     done.push(String(r[ci]).trim());
     made++;
   });
@@ -541,9 +577,10 @@ function treatmentFolders_() {
 
 // RUN THIS ONCE by hand after pasting: creates the folders (it asks for Drive permission) and shows where they are.
 function installClinicFolders() {
-  var f = clinicFolders_(), n = treatmentFolders_();
+  var f = clinicFolders_(), n = treatmentFolders_(), p = copyPhotos_(0);
   status_('folders', true, '');
-  Logger.log(f.root.getUrl() + ' | treatment folders created now: ' + n);
+  Logger.log(f.root.getUrl() + ' | treatment folders created now: ' + n + ' | photos copied now: ' + p);
+  if (p >= 40) Logger.log('There may be more photos: run installClinicFolders again.');
 }
 
 // ---- every minute ------------------------------------------------------------
@@ -585,7 +622,7 @@ function tick() {
       generateRows_();
       applyPending_('');
       // the folders must never stop the rest: a Drive error is only recorded on the STATUS sheet
-      try { treatmentFolders_(); status_('folders', true, ''); } catch (ef) { status_('folders', false, (ef && ef.stack) ? ef.stack : String(ef)); }
+      try { treatmentFolders_(); copyPhotos_(14); status_('folders', true, ''); } catch (ef) { status_('folders', false, (ef && ef.stack) ? ef.stack : String(ef)); }
     });
   }
   finally { try { lock.releaseLock(); } catch (e) {} }
