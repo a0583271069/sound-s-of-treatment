@@ -204,7 +204,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 16/11/2026 18:07</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 16/11/2026 18:19</span></footer>
 </div>
 
 <script>
@@ -493,7 +493,11 @@ function parseMany(text) {
       var ex = uniq(sides);
       gid++;
       ds.forEach(function (d) {
-        sidesFor(d, bendLR ? [] : ex).forEach(function (sd) { out.push(mk(result, d, sd, phrase, gid)); });
+        sidesFor(d, bendLR ? [] : ex).forEach(function (sd) {
+          // a nerve said again for the same direction / side replaces its earlier unanswered problem (a correction, or the same thing said twice)
+          if (d && !isMuscle(root)) out = out.filter(function (x) { return !(x.key === root && x.dir === d && x.side === sd && x.result === 'problem' && !x.answer && (x.sub || '') === (root === 'L5' ? l5t : '')); });
+          out.push(mk(result, d, sd, phrase, gid));
+        });
       });
       spans.push({ a: blockStart >= 0 ? blockStart : at, b: to, k: result }); blockStart = -1;
       lastEmit = at; lastEnd = to; rootFresh = false; pend = null;
@@ -636,7 +640,7 @@ function parseMany(text) {
       if (isMuscle(root) && i - relAt <= RELGAP && hasOpen()) { var hw2 = howAfter(toks, i); answerLast('fixed', i, hw2.end, hw2.ids); i = hw2.end; continue; }
       emit('ok', i); continue;
     }
-    if (/^ה?כיוונים$/.test(w)) {
+    if (/^ה?כיוונים$/.test(w) || (w === 'בכלל' && root && !isMuscle(root) && out.length && out[out.length - 1].key === root && out[out.length - 1].dir === null && i - lastEmit <= 3)) { // "לא עובד בכלל" = all four directions
       var prev = out[out.length - 1];
       if (prev && prev.key === root && prev.dir === null && i - lastEmit <= 3) {
         var res = prev.result, psd = prev.side, pph = (prev.phrase || '') + ' ' + w, pg = prev.g;
