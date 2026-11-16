@@ -764,6 +764,7 @@ function loadPrev() {
 loadPrev();
 
 // ---- draft -----------------------------------------------------------------
+DRAFT += TREATMENT ? ':' + TREATMENT : ''; // every treatment has its own draft: a new treatment never opens with the text of the previous one
 said.value = lsGet(DRAFT) || '';
 said.addEventListener('input', function () { lsSet(DRAFT, said.value); });
 $('clear').onclick = function () {
@@ -780,7 +781,7 @@ var rec = null, wantOn = false, restarts = 0, wake = null;
 function note(txt) { var n = $('sysnote'); n.hidden = !txt; n.textContent = txt || ''; }
 function setStatus(on, txt) { $('status').classList.toggle('on', on); $('statusText').textContent = txt; }
 
-var TLK = 'clinic-timeline-v1';
+var TLK = 'clinic-timeline-v1' + (TREATMENT ? ':' + TREATMENT : '');
 var tl = [], recStart = 0, recent = [], pendingId = null, autoTimer = null, lastSaved = '', saving = false;
 var pendInterim = '', stableTimer = null;
 (function () {
