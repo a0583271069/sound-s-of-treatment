@@ -306,7 +306,7 @@ function applyPending_(onlyTid) {
       var result = String(x[5]), fixed = String(x[8]), dir = String(x[6]), phrase = String(x[9]);
       var side = String(x[12]).trim(), mid = String(x[13]).trim(), mname = String(x[10]).trim(), root = String(x[4]).trim();
       if (!side) side = dir === 'bendR' ? 'right' : dir === 'bendL' ? 'left' : ''; // findings from the older page version
-      if (!mid && mname === 'פיריפורמיס') mid = 'M23';
+      if (!mid && mname === 'פיריפורמיס') mid = '33';
       var isM = !!mid;
       if (isM ? !mReady : !nReady) { waiting++; return; }
       var res = result === 'ok' ? RES_OK : result === 'skip' ? RES_SKIP : RES_BAD;
@@ -368,6 +368,7 @@ function addRows_(resultSheet, keyCol, keys, tid) {
     rows.push(r);
   });
   var start = sh.getLastRow() + 1;
+  sh.getRange(start, idx[keyCol], rows.length, 1).setNumberFormat('@'); // the muscle ids are plain numbers (11-65): keep them as text
   sh.getRange(start, 1, rows.length, width).setValues(rows);
   if (idx.created_at) sh.getRange(start, idx.created_at, rows.length, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
   return rows.length;
@@ -758,4 +759,23 @@ function installWatchdog() {
   status_('tick', true, '');
   alert_('install', 'M.T.R.S.M. - a hibaor bekapcsolt',
     'Ez a proba-level azt jelzi, hogy a hibaor mukodik es tud levelet kuldeni.\nIdo: ' + stamp_());
+}
+
+// ---- one-time: the muscle ids M01..M56 become the plain numbers 11..65 (the order of the MUSCLES sheet) --
+// Run once from the editor (migrateMuscleIds). Safe to run again: only cells that still hold an "M.." id are changed.
+function migrateMuscleIds() {
+  var order = ['M01','M02','M03','M04','M05','M06','M07','M08','M09','M10','M11','M12','M13','M14','M15','M16','M17','M18','M19','M20','M21','M22','M23','M24','M25','M27','M28','M29','M30','M31','M32','M33','M34','M56','M35','M36','M37','M38','M39','M40','M41','M42','M43','M44','M45','M46','M47','M48','M49','M50','M51','M52','M53','M54','M55'];
+  var map = {}; order.forEach(function (id, i) { map[id] = String(i + 11); });
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), rep = [];
+  ['MUSCLES', 'MUSCLE_RESULTS', 'FINDINGS'].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) { rep.push(name + ': -'); return; }
+    var c = headIdx_(sh).muscle_id;
+    if (!c) { rep.push(name + ': nincs muscle_id oszlop'); return; }
+    var rng = sh.getRange(2, c, sh.getLastRow() - 1, 1), v = rng.getValues(), n = 0;
+    var out = v.map(function (r) { var x = String(r[0]).trim(); if (map[x]) { n++; return [map[x]]; } return [r[0]]; });
+    rng.setNumberFormat('@'); rng.setValues(out);
+    rep.push(name + ': ' + n + ' cella atirva');
+  });
+  Logger.log(rep.join(' | '));
 }
