@@ -698,7 +698,7 @@ function installDailyBackup() {
 // ---- nightly integrity check ("doctor") -------------------------------------------
 // Only reads and reports, never changes or deletes data. Result goes to the STATUS sheet (row "doctor");
 // an e-mail is sent only when something is wrong.
-var DOCTOR_SKIP = ['7bd456c3'];   // the authorised real treatment: its extra row is known and handled by hand
+var DOCTOR_SKIP = [];   // treatment ids the check should leave out (none)
 var STUCK_MIN = 60;               // a finding with an empty "applied" cell for longer than this is stuck
 
 function doctor() {
