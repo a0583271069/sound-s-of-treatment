@@ -85,6 +85,7 @@ label.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted)
 .list { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }
+.card[hidden] { display: none; }
 .card.ok { border-inline-start: 6px solid var(--ok); }
 .card.problem { border-inline-start: 6px solid var(--bad); }
 .card.fixed { border-inline-start: 6px solid var(--fix); }
@@ -208,7 +209,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 17:09</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 17:33</span></footer>
 </div>
 
 <script>
@@ -1004,7 +1005,7 @@ function analyze() {
   var dg = all.dangling || [], un = all.unmatched || [], unk = all.unknown || [];
   var parts = [];
   if (unk.length) parts.push('לא זוהה: ' + unk.join(' · ') + ' (מה שנאמר עליו לא נקלט, צריך לומר שוב או לסמן ידנית באפליקציה)');
-  if (unk.some(function (u) { return /פקטורל|pector/i.test(u); })) parts.push('נאמר "פקטורליס" בלי לומר איזה חלק (עליון / תחתון / מינור): לסמן את החלק הנכון ברשימה למטה (42 עליון, 43 תחתון, 44 מינור)');
+  if (unk.some(function (u) { return /פקטורל|pector/i.test(u); })) parts.push('נאמר "פקטורליס" בלי לומר איזה חלק (עליון / תחתון): לסמן את החלק הנכון ברשימה למטה (42 עליון, 43 תחתון)');
   if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
     return (isMuscle(d.root) ? MBY[d.root] : d.root) + ' ' + d.sides.map(function (x) { return SIDES[x]; }).concat(d.dirs.map(function (x) { return DIRS[x]; })).join(' ');
   }).join(' · '));
@@ -1054,7 +1055,7 @@ function renderFound() {
 // tests that were not said in this recording: mark them here instead of by hand in the app.
 // Every side (right / left) has its own mark: not examined / ok / problem / released. A problem asks "fixed or not" and what fixed it.
 // A row stays in the list after marking (it shows the choice and can be changed).
-var lastAll = null, missMs = [], missNs = [];
+var lastAll = null, missMs = [], missNs = [], showDone = false;
 var MANUAL = 'סומן ידנית', SIDEHE = { right: 'ימין', left: 'שמאל' }, HOWORDER = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R9'];
 function heName(m) { var a = (m[2] || '').split('|').filter(function (x) { return /[֐-׿]/.test(x); }); return a.length ? a[0] : ''; }
 function markOf(id, side) {
@@ -1096,6 +1097,7 @@ function drawRow(c, id, isM, num, name, hint) {
   var fs = [markOf(id, 'right'), markOf(id, 'left')];
   var done = !!(fs[0] && fs[1]), openFix = fs.some(function (f) { return f && f.result === 'problem' && !f.answer; });
   c.className = 'card ' + (done && !openFix ? 'ok' : 'unknown');
+  c.hidden = !!(done && !openFix && !showDone); // finished on both sides: the row goes away
   c.appendChild(el('div', 'root', num));
   var pills = el('div', 'pills'); pills.appendChild(el('strong', null, name));
   if (hint) pills.appendChild(el('span', 'pill problem', hint));
@@ -1132,10 +1134,15 @@ function renderMissing() {
     missNs.forEach(function (r) { ['right', 'left'].forEach(function (sd) { if (!markOf(r, sd)) setMark(r, false, sd, 'skip', true); }); });
     renderFound(); renderMissing();
   };
-  head.appendChild(allb); box.appendChild(head);
+  head.appendChild(allb);
+  var shb = el('button', 'small', showDone ? 'הסתר מה שסיימתי' : 'הצג גם מה שסיימתי'); shb.type = 'button';
+  shb.onclick = function () { showDone = !showDone; renderMissing(); };
+  var clb = el('button', 'small', 'סגור את הרשימה'); clb.type = 'button';
+  clb.onclick = function () { box.hidden = true; };
+  head.appendChild(shb); head.appendChild(clb); box.appendChild(head);
   var ucl = lastAll.unclearIds || [], pec = (lastAll.unknown || []).some(function (u) { return /פקטורל|pector/i.test(u); });
   missMs.forEach(function (m) {
-    var hint = ucl.indexOf(m[0]) >= 0 ? 'נאמר בלי תוצאה' : (pec && /^4[234]$/.test(m[0])) ? 'נאמר "פקטורליס" בלי חלק' : '';
+    var hint = ucl.indexOf(m[0]) >= 0 ? 'נאמר בלי תוצאה' : (pec && /^4[23]$/.test(m[0])) ? 'נאמר "פקטורליס" בלי חלק' : '';
     var c = el('div', 'card unknown'); box.appendChild(c);
     drawRow(c, m[0], true, numOf(m[0]), (heName(m) || m[1]) + ' · ' + m[1], hint);
   });

@@ -64,7 +64,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
       <select id="sB"><option value="PHOTO">לפני</option><option value="AFTER">אחרי</option></select>
     </div>
     <div class="row tg" id="toggles2"></div>
-    <div class="row"><button id="cmpLinesBtn" type="button">הצג קווים בהשוואה</button><button id="cmpNormBtn" type="button">התאם לגובה גוף</button><span id="cmpNote" class="note"></span></div>
+    <div class="row"><button id="cmpLinesBtn" type="button">הצג קווים בהשוואה</button><button id="cmpNormBtn" type="button">התאם לגובה גוף</button><button id="cmpGridBtn" type="button">רשת</button><span id="cmpNote" class="note"></span></div>
     <div class="cap" id="capA"></div><div class="cap" id="capB"></div>
     <div id="pairs"></div>
   </section>
@@ -168,7 +168,21 @@ async function drawCmp() {
 }
 let cmpNorm = false;
 const FW = 900, FH = 1200;
-function paintCell(c) {
+function paintCell(c) { paintCell0(c); if (cmpGrid) drawGrid(c.cv); }
+let cmpGrid = false;
+// a grid over the whole frame (every 10%), the centre line is stronger: the same frame in every photo, so the wall and the floor line up
+function drawGrid(cv) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, lw = Math.max(1, W / 450);
+  g.save(); g.lineWidth = lw;
+  for (let i = 1; i < 10; i++) {
+    g.strokeStyle = i === 5 ? 'rgba(220,0,0,.85)' : 'rgba(0,90,255,.45)';
+    g.beginPath(); g.moveTo(W * i / 10, 0); g.lineTo(W * i / 10, H); g.stroke();
+    g.strokeStyle = 'rgba(0,90,255,.45)';
+    g.beginPath(); g.moveTo(0, H * i / 10); g.lineTo(W, H * i / 10); g.stroke();
+  }
+  g.restore();
+}
+function paintCell0(c) {
   if (cmpNorm && cmpLines && c.lm) {
     // same body height in every photo: scale uniformly (no stretching) so head-to-floor fills the same part of the frame
     const L = c.lm, floor = Math.max(L[27].y, L[28].y, L[29].y, L[30].y, L[31].y, L[32].y), top = L[0].y - 0.08 * (floor - L[0].y), h = floor - top;
@@ -389,6 +403,7 @@ $('pat').onchange = fillTreatments;
 $('reload').onclick = load;
 $('plumbRef').onchange = () => { render(); repaintCmp(); };
 $('cmpLinesBtn').onclick = cmpAnalyse;
+$('cmpGridBtn').onclick = () => { cmpGrid = !cmpGrid; $('cmpGridBtn').className = cmpGrid ? 'on' : ''; repaintCmp(); };
 $('cmpNormBtn').onclick = async () => {
   cmpNorm = !cmpNorm; $('cmpNormBtn').className = cmpNorm ? 'on' : '';
   if (cmpNorm && !cmpLines) await cmpAnalyse();
