@@ -3,6 +3,7 @@
 // Project settings > Script properties > add PASSWORD = <your password>.
 // Deploy > New deployment > Web app > Execute as: Me, Who has access: Anyone.
 // Weekly backup: run installBackupTrigger() once from the editor (it asks for Drive permission).
+// Daily backup: installDailyBackup(); nightly integrity check: installDoctor() (run each once from the editor).
 
 var TZ = 'Asia/Jerusalem';
 var CHUNK = 45000; // Google Sheets allows 50,000 characters per cell
@@ -663,6 +664,107 @@ function installBackupTrigger() {
   });
   ScriptApp.newTrigger('weeklyBackup').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
   weeklyBackup(); // first backup right away, also asks for Drive permission
+}
+
+// ---- daily backup: a second folder with the last 14 daily copies ----------------
+// The weekly copies above stay as they are. Run installDailyBackup() once by hand.
+var DAILY_FOLDER = 'גיבויי קליניקה - יומי';
+var DAILY_KEEP = 14;
+
+function dailyBackup() {
+  guard_('dailyBackup', function () {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var file = DriveApp.getFileById(ss.getId());
+    var it = DriveApp.getFoldersByName(DAILY_FOLDER);
+    var folder = it.hasNext() ? it.next() : DriveApp.createFolder(DAILY_FOLDER);
+    var name = ss.getName() + ' - יומי ' + Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+    var same = folder.getFilesByName(name);
+    if (!same.hasNext()) file.makeCopy(name, folder);   // at most one copy per day
+    var list = [], files = folder.getFiles();
+    while (files.hasNext()) { var f = files.next(); list.push({ f: f, t: f.getDateCreated().getTime() }); }
+    list.sort(function (a, b) { return b.t - a.t; });
+    for (var i = DAILY_KEEP; i < list.length; i++) list[i].f.setTrashed(true);
+  });
+}
+
+function installDailyBackup() {
+  ScriptApp.getProjectTriggers().forEach(function (tr) {
+    if (tr.getHandlerFunction() === 'dailyBackup') ScriptApp.deleteTrigger(tr);
+  });
+  ScriptApp.newTrigger('dailyBackup').timeBased().everyDays(1).atHour(2).create();
+  dailyBackup(); // first copy right away, also asks for the Drive permission
+}
+
+// ---- nightly integrity check ("doctor") -------------------------------------------
+// Only reads and reports, never changes or deletes data. Result goes to the STATUS sheet (row "doctor");
+// an e-mail is sent only when something is wrong.
+var DOCTOR_SKIP = ['7bd456c3'];   // the authorised real treatment: its extra row is known and handled by hand
+var STUCK_MIN = 60;               // a finding with an empty "applied" cell for longer than this is stuck
+
+function doctor() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), problems = [];
+  var tids = {}, tlist = keysOf_('TREATMENTS', 'Treatment_ID');
+  tlist.forEach(function (t) { tids[t] = true; });
+  var parts = [
+    { name: 'NEURO_RESULTS', key: 'test_id', expect: keysOf_('NEURO_TESTS', 'test_id') },
+    { name: 'MUSCLE_RESULTS', key: 'muscle_id', expect: keysOf_('MUSCLES', 'muscle_id') }
+  ];
+  parts.forEach(function (p) {
+    var sh = ss.getSheetByName(p.name);
+    if (!sh || sh.getLastRow() < 2) { if (tlist.length) problems.push(p.name + ': ures lap'); return; }
+    var idx = headIdx_(sh);
+    if (!idx.Treatment_ID || !idx[p.key]) { problems.push(p.name + ': hianyzo oszlop'); return; }
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+    var per = {}, orphan = {};
+    for (var i = 0; i < v.length; i++) {
+      var t = String(v[i][idx.Treatment_ID - 1]).trim(), k = String(v[i][idx[p.key] - 1]).trim();
+      if (!t && !k) continue;
+      if (!tids[t]) { orphan[t || '(ures)'] = (orphan[t || '(ures)'] || 0) + 1; continue; }
+      (per[t] = per[t] || {})[k] = ((per[t] || {})[k] || 0) + 1;
+    }
+    Object.keys(orphan).forEach(function (t) { problems.push(p.name + ': ' + orphan[t] + ' arva sor (kezeles nincs): ' + t); });
+    tlist.forEach(function (t) {
+      if (DOCTOR_SKIP.indexOf(t) >= 0) return;
+      var have = per[t] || {}, miss = 0, dup = [];
+      p.expect.forEach(function (k) { if (!have[k]) miss++; });
+      Object.keys(have).forEach(function (k) { if (have[k] > 1) dup.push(k); });
+      if (miss) problems.push(p.name + ' ' + t + ': ' + miss + ' hianyzo sor / ' + p.expect.length);
+      if (dup.length) problems.push(p.name + ' ' + t + ': dupla ' + p.key + ': ' + dup.slice(0, 5).join(','));
+    });
+  });
+  // findings that never reached their result row
+  var fs = ss.getSheetByName('FINDINGS');
+  if (fs && fs.getLastRow() >= 2) {
+    var fi = headIdx_(fs), fv = fs.getRange(2, 1, fs.getLastRow() - 1, fs.getLastColumn()).getValues(), stuck = 0;
+    for (var j = 0; j < fv.length; j++) {
+      var ap = fi.applied ? String(fv[j][fi.applied - 1]).trim() : '';
+      var ft = fi.treatment_id ? String(fv[j][fi.treatment_id - 1]).trim() : '';
+      if (ap || !ft) continue;
+      var at = fi.received_at ? parseStamp_(fv[j][fi.received_at - 1]) : 0;
+      if (!at || Date.now() - at > STUCK_MIN * 60000) stuck++;
+    }
+    if (stuck) problems.push('FINDINGS: ' + stuck + ' lelet nincs alkalmazva (applied ures)');
+  }
+  if (problems.length) {
+    var msg = problems.join(' | ');
+    status_('doctor', false, msg);
+    alert_('doctor', 'M.T.R.S.M. - az ejszakai ellenorzes hibat talalt',
+      'Az ellenorzes semmit nem javit es nem torol, csak jelez.\nIdo: ' + stamp_() + '\n\n' + problems.join('\n') +
+      '\n\nReszletek a STATUS lapon (doctor sor).');
+  } else {
+    status_('doctor', true, '');
+    try { PropertiesService.getScriptProperties().deleteProperty('alert_doctor'); } catch (e) {}
+  }
+  return problems;
+}
+
+// RUN THIS ONCE by hand: nightly check around 04:00, and runs it right away.
+function installDoctor() {
+  ScriptApp.getProjectTriggers().forEach(function (tr) {
+    if (tr.getHandlerFunction() === 'doctor') ScriptApp.deleteTrigger(tr);
+  });
+  ScriptApp.newTrigger('doctor').timeBased().everyDays(1).atHour(4).create();
+  Logger.log(JSON.stringify(doctor()));
 }
 
 // ---- watchdog: a failure must never stay silent -----------------------------
