@@ -100,6 +100,10 @@ label.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted)
 .heard q { color: var(--fg); quotes: "„" "“"; }
 .marks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
 .marks button.on-yes { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.marks .lbl { font-weight: 700; color: var(--muted); align-self: center; font-size: 14px; min-width: 64px; }
+.marks .lbl.need { color: var(--bad); }
+.marks button.on-fix { background: var(--fix-bg); border-color: var(--fix); color: var(--fix); }
+.marks button.on-skip { background: var(--bg); border-color: var(--muted); color: var(--muted); }
 .marks button.on-no { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
 footer { color: var(--muted); font-size: 13px; }
 footer .ver { white-space: nowrap; opacity: .75; }
@@ -204,7 +208,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 16:42</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 17:04</span></footer>
 </div>
 
 <script>
@@ -332,7 +336,7 @@ function findMuscle(toks, i) {
     var al = MALIAS[a], tot = 0;
     for (var k = 0; k < al.ws.length; k++) {
       var t = toks[i + k];
-      var d = t == null ? 99 : kdist(pkey(t), al.ws[k]);
+      var d = t == null || (k > 0 && GLUESTOP.test(t)) ? 99 : kdist(pkey(t), al.ws[k]); // a side / result word is never the 2nd word of a name ("פקטורליס ימין" was heard as "פקטורליס מינור")
       if (d >= 99) { tot = 99; break; }
       tot += d;
     }
@@ -398,6 +402,7 @@ var HOWHE = {R1:'עצב', R2:'מקור וחיבור', R3:'איבר', R4:'NV', R5
 // "שיחררתי": the muscle works too strongly and was released with massage (goes with a result of "עובד")
 var RELW = /^(?:שיחרר\S*|שחרר\S*|שוחרר\S*|שיחרור|הרפיתי|הרפיה)$/;
 var HOWCONN = /^(?:ו|עם|על|ידי|ב|באמצעות|דרך)$/;
+var R2W = /^[וב]?(?:מקור|חיבור|אחיזה|אחז\S*|תחל\S*|תחום|תחילה|תחילת|התחלה|מוצא)$/;
 function howAt(toks, j) {
   var w = toks[j] || '', n = toks[j + 1] || '';
   if (/^ו?(?:אן|אנ|אין|n)$/i.test(w) && /^(?:וי|ווי|בי|v)$/i.test(n)) return { id: 'R4', n: 2 };
@@ -413,7 +418,7 @@ function howAt(toks, j) {
   if (/^[בו]?נר[בו]?$/.test(pw) && /^[בו]?ל(?:מפ|פנ)ת$/.test(pn)) return { id: 'R5', n: 2 };
   if (/^[בו]?ל(?:מפ|פנ)ת$/.test(pw)) return { id: 'R5', n: 1 };
   if (/^[וב]?(?:עצב(?:ים|וב)?|עיצוב)$/.test(w)) return { id: 'R1', n: 1 };
-  if (/^[וב]?(?:מקור|חיבור|אחיזה)$/.test(w)) return { id: 'R2', n: (n === 'וחיבור' || n === 'חיבור') ? 2 : 1 };
+  if (R2W.test(w)) return { id: 'R2', n: R2W.test(n) ? 2 : 1 }; // origin / insertion: "מקור וחיבור", "אחז ותחל" (Chrome hears אחיזה והתחלה like that)
   if (/^[וב]?(?:איבר|אבר|איברים)$/.test(w)) return { id: 'R3', n: 1 };
   if (/^[וב]?(?:צלק\S*|הצלקת)$/.test(w)) return { id: 'R6', n: 1 };
   if (/^[וב]?(?:שיניים|שינים|שן|שיני)$/.test(w)) return { id: 'R7', n: 1 };
@@ -983,7 +988,7 @@ function analyze() {
   note('');
   var all = parseMany(text);
   // the same finding said or heard twice counts once; if one of the copies has an answer ("תוקן"), that one is kept
-  var seenAt = {};
+  var seenAt = {}, keepM = found.filter(function (f) { return f.phrase === MANUAL; });
   found = [];
   all.filter(function (f) { return f.result; }).forEach(function (f) {
     var key = [f.key, f.side, f.dir, f.result].join('|'), at = seenAt[key];
@@ -991,9 +996,13 @@ function analyze() {
     var g = found[at];
     if (f.answer && (!g.answer || f.answer !== g.answer || (f.how || []).length)) { f.implied = f.implied && g.implied; found[at] = f; }
   });
+  var haveA = {}; found.forEach(function (f) { haveA[f.muscle_id || f.key] = 1; });
+  missMs = MDB.filter(function (m) { return !isUnk(m[0]) && !haveA[m[0]]; }).sort(byOrder); missNs = ROOTS.filter(function (r) { return !haveA[r]; });
+  keepM.forEach(function (f) { if (!haveA[f.key]) found.push(f); }); // marks made by hand stay when the text is analysed again
   var dg = all.dangling || [], un = all.unmatched || [], unk = all.unknown || [];
   var parts = [];
   if (unk.length) parts.push('לא זוהה: ' + unk.join(' · ') + ' (מה שנאמר עליו לא נקלט, צריך לומר שוב או לסמן ידנית באפליקציה)');
+  if (unk.some(function (u) { return /פקטורל|pector/i.test(u); })) parts.push('נאמר "פקטורליס" בלי לומר איזה חלק (עליון / תחתון / מינור): לסמן את החלק הנכון ברשימה למטה (42 עליון, 43 תחתון, 44 מינור)');
   if (dg.length) parts.push('לא זוהתה תוצאה (תקין / לא עובד) עבור: ' + dg.map(function (d) {
     return (isMuscle(d.root) ? MBY[d.root] : d.root) + ' ' + d.sides.map(function (x) { return SIDES[x]; }).concat(d.dirs.map(function (x) { return DIRS[x]; })).join(' ');
   }).join(' · '));
@@ -1019,7 +1028,7 @@ function renderFound() {
   found.forEach(function (f) {
     var kind = f.result === 'skip' ? 'unknown' : f.result === 'problem' ? (f.answer === 'fixed' ? 'fixed' : 'problem') : 'ok';
     var c = el('div', 'card ' + kind);
-    c.appendChild(el('div', 'root', (f.muscle_id && numOf(f.muscle_id) ? numOf(f.muscle_id) + ' ' : '') + (f.muscle || (f.root + (f.root === 'L5' ? ' ' + (f.sub === 'EHB' ? 'קצר' : 'ארוך') : '')))));
+    c.appendChild(el('div', 'root', (f.muscle_id && numOf(f.muscle_id) ? numOf(f.muscle_id) + ' ' : '') + (f.muscle || (f.root + (f.root === 'L5' && f.phrase !== MANUAL ? ' ' + (f.sub === 'EHB' ? 'קצר' : 'ארוך') : '')))));
     var pills = el('div', 'pills');
     pills.appendChild(el('span', 'pill ' + (f.result === 'ok' ? 'ok' : f.result === 'skip' ? 'neutral' : 'problem'), f.result === 'ok' ? 'תקין' : f.result === 'skip' ? 'לא נבדק' : 'בעיה'));
     if (f.answer === 'fixed') pills.appendChild(el('span', 'pill fixed', 'תוקן'));
@@ -1032,6 +1041,7 @@ function renderFound() {
     if (!f.known) pills.appendChild(el('span', 'pill neutral', 'שורש לא בטבלה'));
     c.appendChild(pills);
     if (f.phrase) { var ph = el('div', null, f.phrase); ph.style.cssText = 'grid-column:1/-1;font-size:13px;color:var(--muted)'; c.appendChild(ph); }
+    if (f.result === 'problem' && f.phrase !== MANUAL) c.appendChild(fixControls(f, !!f.muscle_id, renderFound)); // a dictated problem can get "fixed / not fixed" here too
     var marks = el('div', 'marks');
     var del = el('button', 'small', 'הסר'); del.type = 'button';
     del.onclick = function () { found = found.filter(function (x) { return x !== f; }); renderFound(); renderMissing(); };
@@ -1039,13 +1049,71 @@ function renderFound() {
     list.appendChild(c);
   });
 }
-// tests that were not said in this recording: mark them here (not examined / ok / problem on one side) instead of by hand in the app
-var lastAll = null;
-function heName(m) { var a = (m[2] || '').split('|').filter(function (x) { return /[\u0590-\u05ff]/.test(x); }); return a.length ? a[0] : ''; }
-function addMark(kind, id, isM, side) {
-  var f = { root: isM ? id : id, key: id, known: true, result: kind === 'skip' ? 'skip' : kind, side: side || '', dir: null, answer: null, phrase: 'סומן ידנית', g: 0 };
-  if (isM) { f.root = ''; f.muscle = MBY[id]; f.muscle_id = id; } else { f.muscle = ''; f.muscle_id = ''; }
+// tests that were not said in this recording: mark them here instead of by hand in the app.
+// Every side (right / left) has its own mark: not examined / ok / problem / released. A problem asks "fixed or not" and what fixed it.
+// A row stays in the list after marking (it shows the choice and can be changed).
+var lastAll = null, missMs = [], missNs = [];
+var MANUAL = 'סומן ידנית', SIDEHE = { right: 'ימין', left: 'שמאל' }, HOWORDER = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R9'];
+function heName(m) { var a = (m[2] || '').split('|').filter(function (x) { return /[֐-׿]/.test(x); }); return a.length ? a[0] : ''; }
+function markOf(id, side) {
+  for (var i = 0; i < found.length; i++) { var f = found[i]; if (f.phrase === MANUAL && f.key === id && f.side === side) return f; }
+  return null;
+}
+function stateOf(f) { return !f ? '' : f.result === 'skip' ? 'skip' : f.result === 'problem' ? 'problem' : (f.how || []).indexOf('R9') >= 0 ? 'rel' : 'ok'; }
+// st: 'skip' | 'ok' | 'problem' | 'rel' (works too strongly, released) | '' (clear). Pressing the same button again clears it, unless force.
+function setMark(id, isM, side, st, force) {
+  var old = markOf(id, side);
+  found = found.filter(function (f) { return f !== old; });
+  if (!st || (!force && old && stateOf(old) === st)) return;
+  var f = { root: isM ? '' : id, key: id, known: true, result: st === 'skip' ? 'skip' : st === 'problem' ? 'problem' : 'ok', side: side, dir: null, answer: null, how: st === 'rel' ? ['R9'] : [], phrase: MANUAL, g: 0 };
+  if (isM) { f.muscle = MBY[id]; f.muscle_id = id; } else { f.muscle = ''; f.muscle_id = ''; }
   found.push(f);
+}
+function unmarked(id) { return !markOf(id, 'right') || !markOf(id, 'left'); }
+function mbtn(label, on, cls, fn) { var b = el('button', 'small' + (on ? ' ' + cls : ''), label); b.type = 'button'; b.onclick = fn; return b; }
+// "fixed / not fixed" and what fixed it (muscles only: nerve, origin and insertion, organ, NV, NL, scars, teeth, released)
+function fixControls(f, isM, redraw) {
+  var w = el('div', 'marks fixline');
+  w.appendChild(el('span', 'lbl' + (f.answer ? '' : ' need'), f.answer ? 'האם תוקן:' : 'האם תוקן? (חסר)'));
+  w.appendChild(mbtn('תוקן', f.answer === 'fixed', 'on-yes', function () { f.answer = f.answer === 'fixed' ? null : 'fixed'; if (!f.answer) f.how = []; redraw(); }));
+  w.appendChild(mbtn('לא תוקן', f.answer === 'notfixed', 'on-no', function () { f.answer = f.answer === 'notfixed' ? null : 'notfixed'; f.how = []; redraw(); }));
+  if (isM && f.answer === 'fixed') {
+    w.appendChild(el('span', 'lbl', 'במה:'));
+    HOWORDER.forEach(function (h) {
+      w.appendChild(mbtn(HOWHE[h], (f.how || []).indexOf(h) >= 0, 'on-fix', function () {
+        f.how = f.how || []; var k = f.how.indexOf(h);
+        if (k >= 0) f.how.splice(k, 1); else f.how.push(h);
+        redraw();
+      }));
+    });
+  }
+  return w;
+}
+function drawRow(c, id, isM, num, name, hint) {
+  c.textContent = '';
+  var fs = [markOf(id, 'right'), markOf(id, 'left')];
+  var done = !!(fs[0] && fs[1]), openFix = fs.some(function (f) { return f && f.result === 'problem' && !f.answer; });
+  c.className = 'card ' + (done && !openFix ? 'ok' : 'unknown');
+  c.appendChild(el('div', 'root', num));
+  var pills = el('div', 'pills'); pills.appendChild(el('strong', null, name));
+  if (hint) pills.appendChild(el('span', 'pill problem', hint));
+  pills.appendChild(el('span', 'pill ' + (openFix ? 'problem' : done ? 'ok' : 'neutral'), openFix ? 'חסר: תוקן / לא תוקן' : done ? 'סומן' : fs[0] || fs[1] ? 'צד אחד סומן' : 'לא סומן'));
+  c.appendChild(pills);
+  function redraw() { drawRow(c, id, isM, num, name, hint); renderFound(); updMissHead(); }
+  var STS = [['skip', 'לא נבדק', 'on-skip'], ['ok', 'תקין', 'on-yes'], ['problem', 'בעיה', 'on-no']];
+  if (isM) STS.push(['rel', 'שוחרר', 'on-fix']);
+  var both = el('div', 'marks'); both.appendChild(el('span', 'lbl', 'שני הצדדים:'));
+  STS.forEach(function (s) {
+    var on = !!(fs[0] && fs[1]) && stateOf(fs[0]) === s[0] && stateOf(fs[1]) === s[0];
+    both.appendChild(mbtn(s[1], on, s[2], function () { ['right', 'left'].forEach(function (sd) { setMark(id, isM, sd, on ? '' : s[0], true); }); redraw(); }));
+  });
+  c.appendChild(both);
+  ['right', 'left'].forEach(function (sd, k) {
+    var f = fs[k], ln = el('div', 'marks'); ln.appendChild(el('span', 'lbl', SIDEHE[sd] + ':'));
+    STS.forEach(function (s) { ln.appendChild(mbtn(s[1], stateOf(f) === s[0], s[2], function () { setMark(id, isM, sd, s[0]); redraw(); })); });
+    c.appendChild(ln);
+    if (f && f.result === 'problem') c.appendChild(fixControls(f, isM, redraw));
+  });
 }
 // the examination order of the muscles (as in the MUSCLES sheet) and its number 11-65 (from 11, so the recognizer writes it with digits, never as a Hebrew number word); the number is only a label to find a muscle in the list
 var MORDER = ["11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65"];
@@ -1053,49 +1121,55 @@ function numOf(id) { var i = MORDER.indexOf(id); return i < 0 ? '' : String(i + 
 function byOrder(a, b) { var x = MORDER.indexOf(a[0]), y = MORDER.indexOf(b[0]); return (x < 0 ? 999 : x) - (y < 0 ? 999 : y); }
 function renderMissing() {
   var box = $('missBox'); box.textContent = '';
-  if (!lastAll) { box.hidden = true; return; }
-  var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
-  (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
-  var ms = MDB.filter(function (m) { return !have[m[0]]; }).sort(byOrder), ns = ROOTS.filter(function (r) { return !have[r]; });
-  if (!ms.length && !ns.length) { box.hidden = true; return; }
+  if (!lastAll || (!missMs.length && !missNs.length)) { box.hidden = true; return; }
   box.hidden = false;
-  var head = el('div', 'result-head'); head.appendChild(el('strong', null, 'לא נאמרו בהקלטה: ' + ms.length + ' שרירים, ' + ns.length + ' עצבים'));
-  var allb = el('button', 'small', 'סמן את כולם כלא נבדק'); allb.type = 'button';
-  allb.onclick = function () { ms.forEach(function (m) { addMark('skip', m[0], true); }); ns.forEach(function (r) { addMark('skip', r, false); }); renderFound(); renderMissing(); };
+  var head = el('div', 'result-head'), ht = el('strong', null, ''); ht.id = 'missHead'; head.appendChild(ht);
+  var allb = el('button', 'small', 'סמן את מה שנשאר כלא נבדק'); allb.type = 'button';
+  allb.onclick = function () {
+    missMs.forEach(function (m) { ['right', 'left'].forEach(function (sd) { if (!markOf(m[0], sd)) setMark(m[0], true, sd, 'skip', true); }); });
+    missNs.forEach(function (r) { ['right', 'left'].forEach(function (sd) { if (!markOf(r, sd)) setMark(r, false, sd, 'skip', true); }); });
+    renderFound(); renderMissing();
+  };
   head.appendChild(allb); box.appendChild(head);
-  function row(label, id, isM) {
-    var c = el('div', 'card unknown'); c.appendChild(el('div', 'root', label));
-    var mk = el('div', 'marks');
-    [['לא נבדק', 'skip', ''], ['תקין', 'ok', ''], ['בעיה ימין', 'problem', 'right'], ['בעיה שמאל', 'problem', 'left']].forEach(function (b) {
-      var bt = el('button', 'small', b[0]); bt.type = 'button';
-      bt.onclick = function () { addMark(b[1], id, isM, b[2]); renderFound(); renderMissing(); };
-      mk.appendChild(bt);
-    });
-    c.appendChild(mk); box.appendChild(c);
-  }
-  ms.forEach(function (m) { row(numOf(m[0]) + ' ' + (heName(m) || m[1]) + ' · ' + m[1], m[0], true); });
-  ns.forEach(function (r) { row('עצב ' + r, r, false); });
+  var ucl = lastAll.unclearIds || [], pec = (lastAll.unknown || []).some(function (u) { return /פקטורל|pector/i.test(u); });
+  missMs.forEach(function (m) {
+    var hint = ucl.indexOf(m[0]) >= 0 ? 'נאמר בלי תוצאה' : (pec && /^4[234]$/.test(m[0])) ? 'נאמר "פקטורליס" בלי חלק' : '';
+    var c = el('div', 'card unknown'); box.appendChild(c);
+    drawRow(c, m[0], true, numOf(m[0]), (heName(m) || m[1]) + ' · ' + m[1], hint);
+  });
+  missNs.forEach(function (r) { var c = el('div', 'card unknown'); box.appendChild(c); drawRow(c, r, false, r, 'עצב ' + r, ''); });
+  updMissHead();
+}
+function updMissHead() {
+  var h = $('missHead'); if (!h) return;
+  var r = missingNow();
+  h.textContent = 'לא נאמרו בהקלטה: ' + missMs.length + ' שרירים, ' + missNs.length + ' עצבים. עוד לא סומנו: ' + (r.ms.length + r.ns.length);
 }
 $('analyze').onclick = analyze;
 
-// pop-up: tests that were NOT said and not marked yet. Shown after the analysis and again before sending.
+// pop-up: tests that were NOT said and not marked yet (on both sides), and marked problems with no "fixed / not fixed" answer. Shown after the analysis and again before sending.
 function missingNow() {
-  if (!lastAll) return { ms: [], ns: [] };
-  var have = {}; found.forEach(function (f) { have[f.muscle_id || f.key] = 1; });
-  (lastAll.unclearIds || []).forEach(function (id) { have[id] = 1; });
-  return { ms: MDB.filter(function (m) { return !have[m[0]]; }).sort(byOrder), ns: ROOTS.filter(function (r) { return !have[r]; }) };
+  if (!lastAll) return { ms: [], ns: [], nf: [] };
+  return {
+    ms: missMs.filter(function (m) { return unmarked(m[0]); }), ns: missNs.filter(unmarked),
+    nf: found.filter(function (f) { return f.phrase === MANUAL && f.result === 'problem' && !f.answer; })
+  };
 }
 function showMissModal(onSend) {
   var old = $('missModal'); if (old) old.remove();
   var r = missingNow();
-  if (!r.ms.length && !r.ns.length) { if (onSend) onSend(); return; }
+  if (!r.ms.length && !r.ns.length && !r.nf.length) { if (onSend) onSend(); return; }
   var ov = el('div', null); ov.id = 'missModal';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:12px';
   var bx = el('div', null);
   bx.style.cssText = 'background:#fff;color:#111;border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;direction:rtl;box-shadow:0 8px 30px rgba(0,0,0,.4)';
-  var h = el('div', null, 'שים לב: לא נאמרו בהקלטה ' + r.ms.length + ' שרירים ו-' + r.ns.length + ' עצבים');
+  var tp = [];
+  if (r.ms.length || r.ns.length) tp.push('לא סומנו ' + r.ms.length + ' שרירים ו-' + r.ns.length + ' עצבים');
+  if (r.nf.length) tp.push(r.nf.length + ' בעיות בלי תשובה אם תוקן');
+  var h = el('div', null, 'שים לב: ' + tp.join(', '));
   h.style.cssText = 'font-weight:700;font-size:1.15em;padding:14px 16px;border-bottom:1px solid #ddd';
   var ls = el('div', null); ls.style.cssText = 'overflow:auto;padding:10px 16px;line-height:1.7';
+  r.nf.forEach(function (f) { ls.appendChild(el('div', null, '• בעיה ' + SIDEHE[f.side] + ': ' + (f.muscle_id ? numOf(f.muscle_id) + ' ' + (heName(MDB.filter(function (m) { return m[0] === f.muscle_id; })[0] || []) || f.muscle) : 'עצב ' + f.root) + ' (תוקן / לא תוקן?)')); });
   r.ms.forEach(function (m) { ls.appendChild(el('div', null, '• ' + numOf(m[0]) + ' ' + (heName(m) || m[1]))); });
   r.ns.forEach(function (n) { ls.appendChild(el('div', null, '• עצב ' + n)); });
   var ft = el('div', null); ft.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid #ddd';
@@ -1120,7 +1194,7 @@ function doSend() {
     pw: c.pw, session: pendingId, patient: $('patient').value.trim(), treatment_id: TREATMENT, lang: $('lang').value, text: text, recognized: lastRec, ignored: lastIgn,
     segments: tl, partial: false,
     findings: found.map(function (f, i) {
-      return { n: i + 1, root: f.root === 'L5' ? 'L5-' + (f.sub || 'EHL') : f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '', how: (f.how || []).join(',') };
+      return { n: i + 1, root: f.root === 'L5' && f.phrase !== MANUAL ? 'L5-' + (f.sub || 'EHL') : f.root, result: f.result, dir: f.dir || '', dirHe: f.dir ? DIRS[f.dir] : '', fixed: f.result === 'problem' ? (f.answer || '') : '', phrase: f.phrase || '', muscle: f.muscle || '', muscle_id: f.muscle_id || '', side: f.side || '', how: (f.how || []).join(',') };
     })
   };
   var btn = $('send'); btn.disabled = true; btn.textContent = 'שולח…';
@@ -1132,7 +1206,7 @@ function doSend() {
         msg.textContent = (j.duplicate ? 'כבר התקבל קודם. ' : 'נשלח ✓ ') + body.findings.length + ' ממצאים והטקסט המלא.'
           + (j.waiting > 0 ? ' השורות של הטיפול עוד לא הגיעו מהטאבלט לגיליון. הממצאים ייכנסו אליהן אוטומטית תוך כמה דקות, ואז לרענן את האפליקציה.'
             : j.done > 0 ? ' הממצאים נכתבו לשורות הטיפול. לרענן את האפליקציה כדי לראות אותם.' : '');
-        said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); found = [];
+        said.value = ''; lsDel(DRAFT); lsDel(TLK); tl = []; recStart = 0; pendingId = null; lastSaved = ''; recent = []; pendInterim = ''; setAuto(''); found = []; missMs = []; missNs = [];
         lastAll = null; $('list').textContent = ''; $('resultBox').hidden = true; $('notice').hidden = true; $('colored').hidden = true; lastRec = ''; lastIgn = '';
       } else {
         msg.className = 'errmsg';
