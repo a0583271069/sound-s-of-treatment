@@ -208,7 +208,7 @@ details .fields { display: flex; flex-direction: column; gap: 10px; }
   <section class="list" id="list"></section>
 
   <!-- the date of this page, so it is visible at a glance whether the tablet has the newest one -->
-  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 17:04</span></footer>
+  <footer>שורשים מוכרים: C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2. הדף לא שומר נתוני מטופלים. הטקסט נשלח רק לגיליון שלך. <span class="ver">גרסה 17/11/2026 17:09</span></footer>
 </div>
 
 <script>
@@ -228,8 +228,8 @@ var SIDES = {right:'ימין', left:'שמאל'};
 // Spellings only need to be close: words are compared by sound (see pkey / kmatch).
 var MDB = [
   // "minimus": the list has no gluteus minimus, and the recognizer writes it for "medius"
-  ['11','gluteus medius','גלוטאוס מדיוס|גלוטיאוס מדיוס|גלוטאוס מדיאוס|גלוטאוס מדיום|בלוטוס מדיוס|גלוטוס מדיוס|גלוטאוס|גלוטוס|בלוטוס|גלוטאוס מינימוס|גלוטוס מינימוס|בלוטוס מינימוס|גלוטיאוס מינימוס|מינימוס|פלוטוס מדוז|בלוטוס מדוז|פלוטוס מדיוס|פלוטוס מידיוס|פלוטוס|פלוס מדוס'],
-  ['12','tensor fasciae latae','טנסור פשיה לטה|טנסור פאשיה לאטה|טנסור פשיה לאטה|טנסור|טי אף אל|tfl|טי אפ אל|טיאף אל|תי אף אל|טי איף אל|טי אף אלה|טי אף איל|טי אף אס|tfs|טי אף סי'],
+  ['11','gluteus medius','גלוטאוס מדיוס|גלוטיאוס מדיוס|גלוטאוס מדיאוס|גלוטאוס מדיום|בלוטוס מדיוס|גלוטוס מדיוס|גלוטאוס|גלוטוס|בלוטוס|גלוטאוס מינימוס|גלוטוס מינימוס|בלוטוס מינימוס|גלוטיאוס מינימוס|מינימוס|פלוטוס מדוז|בלוטוס מדוז|פלוטוס מדיוס|פלוטוס מידיוס|פלוס מדוס'],
+  ['12','tensor fasciae latae','טנסור פשיה לטה|טנסור פאשיה לאטה|טנסור פשיה לאטה|טנסור|טי אף אל|tfl|טי אפ אל|טיאף אל|תי אף אל|טי איף אל|טי אף אלה|טי אף איל|טי אף אס|tfs|טי אף סי|t f s|t f l'],
   ['13','iliopsoas (Psoas + Iliacus)','איליופסואס|אילאופסואס|איליאופסואס|איליופסואז|פסואס|פסואז|איליאקוס|איליו פסואס|אילאו פסואס|איליאו פסואס|איליו פסוס|אילאו פסוס|פסוס|איליאו פסוס|בשואה|פסואה|פסוואה'],
   ['14','quadriceps femoris','קוואדריספס|קוודריספס|קוואדריצפס|קוודריצפס|קוואדריספס פמוריס|קוודריספס פמוריס|ארבע ראשי|שריר ארבע ראשי|ארבע ראשים|קוואד|קוואדס|קוודס|ארבע ראש|ארבעה ראשים|4 ראשי|4 ראשים|4 ראש'],
   ['15','rectus femoris','רקטוס פמוריס|רקטוס פמורוס|רקטוס פמורס|פרדס פמוריס|פרדסה פמוריס|רק פמוריס|רק תוספה מוריס|רק תוספה'],
@@ -324,8 +324,9 @@ function kdist(a, b) {
 var MALIAS = [];
 MDB.forEach(function (m) {
   m[2].split('|').forEach(function (v) {
-    var ws = v.trim().split(/\s+/).map(pkey).filter(Boolean);
-    if (ws.length) MALIAS.push({ id: m[0], ws: ws });
+    var rw = v.trim().toLowerCase().split(/\s+/), ws = rw.map(pkey).filter(Boolean);
+    // a name whose sound key is 1-2 letters ("קיול" = QL, "פסוס" = psoas) matches only when spelled exactly: by sound it equals common words ("ככה", "כל", "אפס")
+    if (ws.length) MALIAS.push({ id: m[0], ws: ws, raw: rw, strict: (ws.join('').length <= 2 || rw.join(' ') === 'פרחים') && ws.length === rw.length });
   });
 });
 // the muscle named at token position i: the longest spoken name wins; among those the closest sound.
@@ -337,6 +338,7 @@ function findMuscle(toks, i) {
     for (var k = 0; k < al.ws.length; k++) {
       var t = toks[i + k];
       var d = t == null || (k > 0 && GLUESTOP.test(t)) ? 99 : kdist(pkey(t), al.ws[k]); // a side / result word is never the 2nd word of a name ("פקטורליס ימין" was heard as "פקטורליס מינור")
+      if (d < 99 && al.strict && String(t).toLowerCase() !== al.raw[k]) d = 99;
       if (d >= 99) { tot = 99; break; }
       tot += d;
     }
@@ -365,7 +367,7 @@ function isMuscle(r) { return /^(?:1[1-9]|[2-5]\d|6[0-5])$/.test(String(r || '')
 // "X1" / "X0": a name that was heard but cannot be resolved (pectoralis without a part, a root like "c68")
 function isUnk(r) { return /^X\d+$/.test(String(r || '')); }
 // words that are never half of a muscle name (results, sides, "not", ...): not glued to the next word
-var GLUESTOP = /^(?:לא|ה?ימין|ה?שמאל|ימינה|שמאלה|תקי[נן]\S*|עובד\S*|תוק\S*|מתוק\S*|שניהם|שניהן|ה?צדדים|ה?שרירים|ה?עצבים|ה?יד|ה?רגל|ה?רגע|אחורה|קדימה|וגם|גם|כל|הכל)$/;
+var GLUESTOP = /^(?:לא|ה?ימין|ה?שמאל|ימינה|שמאלה|תקי[נן]\S*|עובד\S*|תוק\S*|מתוק\S*|שניהם|שניהן|ה?צדדים|ה?שרירים|ה?עצבים|ה?יד|ה?רגל|ה?רגע|אחורה|קדימה|וגם|גם|כל|הכל|לו|לה|לי|לך|אני|אתה|זה|הוא|היא|כן|אז|עם|על|מה|טוב|בסדר|יופי|רוצה|להגיד)$/;
 
 function normalize(t) {
   // invisible direction marks that Chrome puts before Latin words ("‏c7"): they made "c7" an unknown word
@@ -388,7 +390,7 @@ function has(re, s) { return re.test(' ' + s + ' '); }
 // Several findings in one dictation: "c2 עובד c3 תקין c6 שמאל לא עובד תוקן ימין עובד"
 var OKW = /^(?:תקי[נן]\S*|ש?עובד\S*|חזק\S*|בסדר|מצוין|מצויין|מעולה|טוב(?:ים|ה|ות)?|סופר|יופי|מושלם|נהדר|מוסטקין)$/;
 var BADW = /^(?:חלש\S*|בעיה|בעייה)$/;
-var FIXW = /^(?:מ?תוק[נן]\S*|תוכ[נן]|תיקנ\S*)$/;
+var FIXW = /^(?:מ?תוק[נן]\S*|תוק[ףפ]|תוכ[נן]|תיקנ\S*)$/;
 // "מימין" / "משמאל" (on the right / on the left) are said as often as "ימין" / "שמאל"
 var SIDER = /^(?:[הבמו]?(?:ימין|ימנית)|ימים)$/, SIDEL = /^(?:[הבמו]?(?:שמאל|שמאלית)|וסול)$/, SIDEBOTH = /^(?:ה?צדדים|שניהם|שניהן)$/;
 var BLOCKW = /^(?:ה?שרירים|ה?עצבים)$/; // "muscles" / "nerves": a new block starts, the last root no longer applies
