@@ -807,7 +807,13 @@ function alert_(name, subject, body) {
 // runs fn, records what happened, and shouts on a failure
 function guard_(name, fn) {
   try {
-    fn();
+    // a short Google-side hiccup ("error in the Spreadsheet service") is retried once before it counts as an error
+    try { fn(); }
+    catch (e0) {
+      if (!/בשירות|Service|Timeout|temporar|Server error/i.test(String(e0 && e0.message ? e0.message : e0))) throw e0;
+      Utilities.sleep(4000);
+      fn();
+    }
     try { PropertiesService.getScriptProperties().deleteProperty('alert_' + name); } catch (e) {}
     status_(name, true, '');
   } catch (err) {
@@ -1032,7 +1038,15 @@ function recFindingsPrompt_(transcript) {
 }
 
 // the 5-minute trigger
-function processRecordings() {
+// Searches only Sunday-Thursday 08:00-22:00 (Israel time). A run started by hand from the editor (no event) and the
+// one-off follow-up runs of a recording that is already being processed are not limited.
+function recActiveNow_() {
+  var d = new Date(), day = Number(Utilities.formatDate(d, TZ, 'u')), h = Number(Utilities.formatDate(d, TZ, 'H'));
+  return day !== 5 && day !== 6 && h >= 8 && h < 22;
+}
+
+function processRecordings(e) {
+  if (e && e.triggerUid && !recActiveNow_() && e.triggerUid !== PropertiesService.getScriptProperties().getProperty('REC_KICK')) return;
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return;
   try { guard_('recordings', recRun_); }
