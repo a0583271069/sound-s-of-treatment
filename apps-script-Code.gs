@@ -77,7 +77,7 @@ function photo_(file) {
 }
 
 // ---- complaint / change + pain scale: two extra columns at the end of TREATMENTS (added automatically) --------------
-var T_EXTRA = ['COMPLAINT_CHANGE', 'PAIN_BEFORE'];
+var T_EXTRA = ['COMPLAINT_CHANGE', 'PAIN_BEFORE', 'RECORDING', 'REC_STATE'];
 function ensureTreatmentCols_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
   if (!sh) return;
@@ -880,4 +880,314 @@ function migrateMuscleIds() {
     rep.push(name + ': ' + n + ' cella atirva');
   });
   Logger.log(rep.join(' | '));
+}
+
+// =====================================================================================================================
+// ---- recording -> Gemini -> findings ---------------------------------------------------------------------------
+// The treatment is recorded with the tablet's own recorder and the file is attached to the treatment row in AppSheet
+// (column RECORDING). Every 5 minutes processRecordings() looks for such rows (REC_STATE not finished), sends the audio
+// to Gemini in ~6 MB pieces (an MP3 can be cut anywhere), joins the transcript, asks Gemini for the findings and writes
+// them to FINDINGS - applyPending_ then fills the muscle / nerve rows exactly as the old dictation page did.
+// The API key lives only in Script properties (GEMINI_KEY). REC_STATE shows the progress in the app.
+// =====================================================================================================================
+var GEM_MODEL = 'gemini-4-carbon';
+var REC_PIECE = 6 * 1024 * 1024;     // bytes sent to Gemini per call (inline, base64 = +33%)
+var REC_MAX_INLINE = 14 * 1024 * 1024; // a non-MP3 file (cannot be cut) must fit in one call
+var REC_BUDGET_MS = 240000;          // stop starting new pieces after this much run time (limit is 6 min)
+var REC_WORK = 'REC_WORK', REC_WORK_HEAD = ['treatment_id', 'idx', 'text', 'updated_at'];
+var REC_ROOTS = ['C5', 'C6', 'C7', 'C8', 'T1', 'L2', 'L3', 'L4', 'L5', 'S1', 'S2'];
+var REC_MUSCLES = '11|gluteus medius|גלוטאוס מדיוס\n12|tensor fasciae latae|טנסור פשיה לטה\n13|iliopsoas (Psoas + Iliacus)|איליופסואס\n14|quadriceps femoris|קוואדריספס\n15|rectus femoris|רקטוס פמוריס\n16|vastus lateralis|וסטוס לטרליס\n17|vastus medialis|וסטוס מדיאליס\n18|vastus intermedius|וסטוס אינטרמדיוס\n19|adductores|אדוקטורס\n20|quadratus lumborum|קוואדרטוס לומבורום\n21|sartorius|סרטוריוס\n22|gastrocnemius|גסטרוקנמיוס\n23|gastrocnemius (caput lat.)|גסטרוקנמיוס לטרלי\n24|gastrocnemius (caput med.)|גסטרוקנמיוס מדיאלי\n25|popliteus|פופליטאוס\n26|tibialis anterior|טיביאליס אנטריור\n27|fibularis (peroneus)|פרונאוס\n28|tibialis posterior|טיביאליס פוסטריור\n29|gluteus maximus|גלוטאוס מקסימוס\n30|hamstrings|המסטרינג\n31|biceps femoris|ביספס פמוריס\n32|semitendinosus / semimembranosus|סמיטנדינוזוס\n33|piriformis|פיריפורמיס\n34|soleus|סולאוס\n35|erector spinae|ארקטור ספיינה\n36|transversospinales|טרנסוורסוספינליס\n37|splenius|ספלניוס\n38|rectus abdominis (pars sup., ülés 75°)|רקטוס אבדומיניס עליון\n39|rectus abdominis (pars inf., ülés 90°)|רקטוס אבדומיניס תחתון\n40|obliquus externus abdominis|אובליקוס חיצוני\n41|obliquus internus abdominis|אובליקוס פנימי\n42|pectoralis major (pars clav.)|פקטורליס קלביקולרי\n43|pectoralis major (pars stern.)|פקטורליס סטרנלי\n45|longus colli|לונגוס קולי\n46|sternocleidomastoideus|סטרנוקלידומסטואידיאוס\n47|scaleni|סקאלני\n48|supraspinatus|סופרספינטוס\n49|latissimus dorsi|לטיסימוס דורסי\n50|trapezius (pars trans./med.)|טרפזיוס אמצעי\n51|trapezius (pars asc./inf.)|טרפזיוס תחתון\n52|trapezius (pars desc./sup.)|טרפזיוס עליון\n53|serratus anterior|סראטוס אנטריור\n54|deltoideus|דלטואידאוס\n55|deltoideus (pars clav./ant.)|דלטואיד קדמי\n56|deltoideus (pars spin./post.)|דלטואיד אחורי\n57|infraspinatus|אינפרספינטוס\n58|subscapularis|סובסקפולריס\n59|rhomboidei|רומבואידס\n60|levator scapulae|לבטור סקפולה\n61|teres minor|טרס מינור\n62|biceps brachii|ביספס ברכיי\n63|brachioradialis|ברכיורדיאליס\n64|triceps brachii|טרייספס\n65|coracobrachialis|קורקוברכיאליס\n44|pectoralis minor|פקטורליס מינור';
+
+function gemKey_() {
+  var k = PropertiesService.getScriptProperties().getProperty('GEMINI_KEY');
+  if (!k) throw new Error('GEMINI_KEY hianyzik a Script properties-bol');
+  return k;
+}
+
+// one generateContent call; returns the text. Throws an Error with .transient = true for 429 / 5xx / timeouts
+function gemCall_(parts, schema) {
+  var body = { contents: [{ role: 'user', parts: parts }], generationConfig: { thinkingConfig: { thinkingLevel: 'low' } } };
+  if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
+  var r;
+  try {
+    r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + GEM_MODEL + ':generateContent', {
+      method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': gemKey_() },
+      payload: JSON.stringify(body), muteHttpExceptions: true
+    });
+  } catch (e) { var te = new Error('Gemini hivas nem sikerult: ' + e); te.transient = true; throw te; }
+  var code = r.getResponseCode(), txt = r.getContentText();
+  if (code !== 200) {
+    var er = new Error('Gemini HTTP ' + code + ': ' + txt.slice(0, 300));
+    er.transient = (code === 429 || code >= 500);
+    er.code = code;
+    throw er;
+  }
+  var j = JSON.parse(txt), c = j.candidates && j.candidates[0];
+  if (!c || !c.content || !c.content.parts) { var e2 = new Error('Gemini ures valasz: ' + txt.slice(0, 300)); e2.transient = true; throw e2; }
+  return c.content.parts.filter(function (p) { return p.text && !p.thought; }).map(function (p) { return p.text; }).join('');
+}
+
+// sets the REC_STATE cell of the treatment (plain text)
+function recState_(tid, text) {
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+    var h = headIdx_(sh), ti = h['Treatment_ID'] - 1, si = h['REC_STATE'] - 1;
+    if (!(ti >= 0) || !(si >= 0)) return;
+    var ids = sh.getRange(2, ti + 1, Math.max(1, sh.getLastRow() - 1), 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === tid) { sh.getRange(i + 2, si + 1).setNumberFormat('@').setValue(text); return; }
+  } catch (e) {}
+}
+
+function recWorkSheet_() { return sheet_(REC_WORK, REC_WORK_HEAD); }
+function recTexts_(tid) {
+  var sh = recWorkSheet_(), n = sh.getLastRow(), out = {};
+  if (n < 2) return out;
+  sh.getRange(2, 1, n - 1, 3).getValues().forEach(function (r) { if (String(r[0]) === tid) out[Number(r[1])] = String(r[2]); });
+  return out;
+}
+function recSaveText_(tid, idx, text) {
+  var sh = recWorkSheet_();
+  sh.getRange(sh.getLastRow() + 1, 1, 1, 4).setNumberFormat('@').setValues([[tid, String(idx), text.slice(0, 45000), stamp_()]]);
+}
+function recClearWork_(tid) {
+  var sh = recWorkSheet_(), n = sh.getLastRow();
+  if (n < 2) return;
+  var v = sh.getRange(2, 1, n - 1, 1).getValues();
+  for (var i = v.length - 1; i >= 0; i--) if (String(v[i][0]) === tid) sh.deleteRow(i + 2);
+}
+
+function recFile_(path) {
+  var base = String(path).split('/').pop().trim();
+  if (!base) return null;
+  var it = DriveApp.getFilesByName(base);
+  return it.hasNext() ? it.next() : null;
+}
+
+// bytes [a, b] of a Drive file
+function recBytes_(fileId, a, b) {
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), Range: 'bytes=' + a + '-' + b }, muteHttpExceptions: true
+  });
+  var c = r.getResponseCode();
+  if (c !== 200 && c !== 206) {
+    var e = new Error('Drive letoltes HTTP ' + c + ': ' + r.getContentText().slice(0, 200));
+    e.transient = (c === 429 || c >= 500);
+    throw e;
+  }
+  return r.getContent();
+}
+
+var REC_PROMPT_T = 'זו הקלטה של טיפול שיקומי. מטפל בשם אברהם בודק שרירים ושורשי עצב אצל מטופל. ' +
+  'תמלל את ההקלטה מילה במילה בעברית, בלי לדלג ובלי לקצר ובלי להוסיף דבר שלא נאמר. ציין מי מדבר (אברהם / המטופל) בתחילת כל תור דיבור. ' +
+  'שמות שרירים נאמרים בלטינית או בעברית (למשל פסואס, טיביאליס אנטריור, פיריפורמיס), שורשי עצב נאמרים כמו C5, L4, S1, ' +
+  'ומילים חשובות במיוחד הן: ימין, שמאל, עובד, לא עובד, תקין, תוקן, לא תוקן, שיחררתי. כתוב אותן במדויק. ' +
+  'ההקלטה היא קטע מתוך הקלטה ארוכה יותר, ולכן היא עשויה להתחיל או להסתיים באמצע מילה או משפט. החזר רק את התמלול.';
+
+function recMuscleList_() { return REC_MUSCLES.replace(/\|/g, ' | '); }
+
+function recCorrections_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CORRECTIONS'), out = [];
+  if (!sh || sh.getLastRow() < 2) return '';
+  var v = sh.getDataRange().getValues(), h = v[0].map(String), ci = h.indexOf('correction_id'), ni = h.indexOf('name_he');
+  for (var i = 1; i < v.length; i++) if (String(v[i][ci]).trim()) out.push(String(v[i][ci]).trim() + ' = ' + String(v[i][ni]).trim());
+  return out.join('\n');
+}
+
+function recSchema_() {
+  return {
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: {
+        kind: { type: 'STRING', enum: ['muscle', 'nerve'] },
+        muscle_id: { type: 'STRING' },
+        root: { type: 'STRING' },
+        side: { type: 'STRING', enum: ['right', 'left', 'unknown'] },
+        result: { type: 'STRING', enum: ['ok', 'bad', 'skip'] },
+        fixed: { type: 'STRING', enum: ['fixed', 'notfixed', 'none'] },
+        how: { type: 'ARRAY', items: { type: 'STRING' } },
+        phrase: { type: 'STRING' }
+      },
+      required: ['kind', 'side', 'result', 'fixed', 'phrase']
+    }
+  };
+}
+
+function recFindingsPrompt_(transcript) {
+  return 'להלן תמלול של טיפול שיקומי. המטפל (אברהם) בודק שרירים ושורשי עצב בשני צדי הגוף ואומר את התוצאה בקול. ' +
+    'חלץ רק את הממצאים שהמטפל אמר, כרשימה מובנית, ואל תמציא כלום.\n\n' +
+    'כללים:\n' +
+    '- kind = muscle לשריר, nerve לשורש עצב (C5 C6 C7 C8 T1 L2 L3 L4 L5 S1 S2).\n' +
+    '- לשריר: muscle_id הוא המספר מהרשימה למטה (התאם גם לפי שם עברי מדובר בשמיעה, כולל כתיב קרוב). אם אי אפשר לזהות בביטחון שריר מהרשימה, muscle_id ריק ובשדה phrase כתוב מה נאמר.\n' +
+    '- לעצב: root הוא אחד מהשורשים. שורש בלי צד שנאמר: side = unknown.\n' +
+    '- side: right = ימין, left = שמאל. רק אם נאמר. אם לא נאמר צד, unknown. אל תנחש ואל תחליף צדדים. אם נאמר "שני הצדדים" / "ימין ושמאל", החזר שני ממצאים נפרדים.\n' +
+    '- result: ok = עובד / תקין / חזק; bad = לא עובד / חלש; skip = לא נבדק / דילגנו.\n' +
+    '- fixed: אם התוצאה bad ואחר כך נאמר שתוקן: fixed. אם נאמר שלא תוקן: notfixed. אחרת none.\n' +
+    '- how: מזהי התיקון מהרשימה למטה, רק כשנאמר במפורש במה תוקן (למשל "תוקן עם מקור וחיבור" = R2). המזהה R9 (שיחררתי) מתאים לשריר שעבד חזק מדי ושוחרר בעיסוי, גם כשהתוצאה ok. אם לא נאמר, מערך ריק.\n' +
+    '- אותו שריר ואותו צד שנאמרו יותר מפעם אחת: החזר פעם אחת עם המצב הסופי.\n' +
+    '- phrase: ציטוט קצר מהתמלול שממנו הוצא הממצא (עד 12 מילים).\n' +
+    '- שיחה עם המטופל שאינה ממצא: התעלם.\n\n' +
+    'רשימת השרירים (מספר | שם לטיני | שם עברי):\n' + recMuscleList_() + '\n\n' +
+    'מזהי תיקון:\n' + recCorrections_() + '\n\nהתמלול:\n' + transcript;
+}
+
+// the 5-minute trigger
+function processRecordings() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try { guard_('recordings', recRun_); }
+  finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+function recKick_() {
+  // one extra run in a minute when there is more to do
+  var p = PropertiesService.getScriptProperties();
+  recUnkick_();
+  var t = ScriptApp.newTrigger('processRecordings').timeBased().after(60000).create();
+  p.setProperty('REC_KICK', t.getUniqueId());
+}
+function recUnkick_() {
+  var p = PropertiesService.getScriptProperties(), id = p.getProperty('REC_KICK');
+  if (!id) return;
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getUniqueId() === id) { try { ScriptApp.deleteTrigger(t); } catch (e) {} } });
+  p.deleteProperty('REC_KICK');
+}
+
+function recRun_() {
+  recUnkick_();
+  var t0 = Date.now(), p = PropertiesService.getScriptProperties();
+  ensureTreatmentCols_();
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+  if (!sh || sh.getLastRow() < 2) return;
+  var h0 = headIdx_(sh), h = {};
+  Object.keys(h0).forEach(function (k) { h[k] = h0[k] - 1; });
+  if (h['RECORDING'] === undefined || h['REC_STATE'] === undefined) return;
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+  var todo = [];
+  v.forEach(function (r) {
+    var rec = String(r[h['RECORDING']]).trim(), st = String(r[h['REC_STATE']]).trim();
+    if (!rec || /^בוצע/.test(st) || /^שגיאה/.test(st)) return;
+    todo.push({ tid: String(r[h['Treatment_ID']]).trim(), pid: String(r[h['PATIENT_ID']]).trim(), num: r[h['TREATMENT_NUMBER']], date: r[h['DATE']], rec: rec });
+  });
+  var more = false;
+  for (var k = 0; k < todo.length; k++) {
+    if (Date.now() - t0 > REC_BUDGET_MS) { more = true; break; }
+    var job = todo[k];
+    if (!job.tid) continue;
+    try { if (recJob_(job, t0)) more = true; }
+    catch (err) {
+      if (err && err.transient) {
+        var key = 'RECERR_' + job.tid, n = Number(p.getProperty(key) || 0) + 1;
+        p.setProperty(key, String(n));
+        if (n >= 8) { recState_(job.tid, 'שגיאה: ' + String(err.message).slice(0, 150)); alert_('rec_' + job.tid, 'M.T.R.S.M. - a hangfelvetel feldolgozasa nem sikerult', String(err.message)); }
+        else { recState_(job.tid, 'ממתין (ניסיון חוזר ' + n + ')'); more = true; }
+      } else {
+        recState_(job.tid, 'שגיאה: ' + String(err && err.message ? err.message : err).slice(0, 150));
+        alert_('rec_' + job.tid, 'M.T.R.S.M. - a hangfelvetel feldolgozasa megallt',
+          'Treatment: ' + job.tid + '\n' + String(err && err.stack ? err.stack : err) +
+          '\n\nHa 402 / fizetes a hiba: toltsd fel az egyenleget az AI Studio-ban, majd torold a REC_STATE cellat a TREATMENTS lapon, es ujra probalja.');
+      }
+    }
+  }
+  if (more) recKick_();
+}
+
+// advances one treatment; returns true when it still has work to do
+function recJob_(job, t0) {
+  var p = PropertiesService.getScriptProperties(), skey = 'REC_' + job.tid;
+  var file = recFile_(job.rec);
+  if (!file) { recState_(job.tid, 'ממתין לקובץ'); return false; }
+  var size = file.getSize(), isMp3 = /mp3|mpeg/i.test(file.getMimeType()) || /\.mp3$/i.test(file.getName());
+  var st = JSON.parse(p.getProperty(skey) || 'null');
+  if (!st || st.id !== file.getId() || st.size !== size) {
+    var pieces;
+    if (isMp3) pieces = Math.max(1, Math.ceil(size / REC_PIECE));
+    else { if (size > REC_MAX_INLINE) throw new Error('קובץ גדול מדי בפורמט שאי אפשר לחתוך (' + Math.round(size / 1048576) + ' MB). הקלט כ-MP3.'); pieces = 1; }
+    st = { id: file.getId(), size: size, n: pieces, mime: isMp3 ? 'audio/mpeg' : file.getMimeType() };
+    p.setProperty(skey, JSON.stringify(st));
+    recClearWork_(job.tid);
+  }
+  var texts = recTexts_(job.tid);
+  for (var i = 0; i < st.n; i++) {
+    if (texts[i] !== undefined) continue;
+    if (Date.now() - t0 > REC_BUDGET_MS) { recState_(job.tid, 'מתמלל ' + i + '/' + st.n); return true; }
+    recState_(job.tid, 'מתמלל ' + (i + 1) + '/' + st.n);
+    var a = i * REC_PIECE, b = Math.min(size, (i + 1) * REC_PIECE) - 1;
+    if (st.n === 1) { a = 0; b = size - 1; }
+    var bytes = recBytes_(st.id, a, b);
+    var txt = gemCall_([{ text: REC_PROMPT_T }, { inlineData: { mimeType: st.mime, data: Utilities.base64Encode(bytes) } }]);
+    texts[i] = txt;
+    recSaveText_(job.tid, i, txt);
+    p.deleteProperty('RECERR_' + job.tid);
+  }
+  // all pieces done
+  var full = [];
+  for (var j = 0; j < st.n; j++) full.push(texts[j]);
+  var transcript = full.join('\n');
+  recState_(job.tid, 'מנתח');
+  var js = JSON.parse(gemCall_([{ text: recFindingsPrompt_(transcript) }], recSchema_()));
+  recFinish_(job, transcript, js, file);
+  p.deleteProperty(skey);
+  p.deleteProperty('RECERR_' + job.tid);
+  recClearWork_(job.tid);
+  return false;
+}
+
+function recFinish_(job, transcript, list, file) {
+  var now = stamp_(), session = 'rec-' + job.tid;
+  var ok = {}; REC_MUSCLES.split('\n').forEach(function (l) { ok[l.split('|')[0]] = 1; });
+  var rows = [], check = [];
+  list.forEach(function (x, i) {
+    var side = x.side === 'right' || x.side === 'left' ? x.side : '';
+    var mid = x.kind === 'muscle' ? String(x.muscle_id || '').trim() : '';
+    var root = x.kind === 'nerve' ? String(x.root || '').trim().toUpperCase() : '';
+    if (x.kind === 'muscle' && !ok[mid]) { check.push('שריר לא זוהה: ' + x.phrase); return; }
+    if (x.kind === 'nerve' && REC_ROOTS.indexOf(root) < 0) { check.push('שורש לא זוהה: ' + x.phrase); return; }
+    if (!side) check.push('בלי צד: ' + x.phrase);
+    var fixed = x.fixed === 'fixed' || x.fixed === 'notfixed' ? x.fixed : '';
+    var how = (x.how || []).filter(function (id) { return /^R[1-9]$/.test(id); }).join(',');
+    rows.push([now, session, job.pid, rows.length + 1, root, x.result, '', '', fixed, String(x.phrase || ''), mid ? '' : '', job.tid, side, mid, '', how]);
+  });
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var t = sheet_('TRANSCRIPTS', T_HEAD), last = t.getLastRow(), row = 0;
+    if (last > 1) {
+      var ids = t.getRange(2, 3, last - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === session) { row = i + 2; break; }
+    }
+    var rp = parts_(transcript, 4);
+    var vals = [now, now, session, job.pid, 'he', rows.length].concat(rp, ['', ''], [job.tid, '', check.join('\n').slice(0, CHUNK)]);
+    if (!row) row = last + 1;
+    t.getRange(row, 1, 1, vals.length).setNumberFormat('@').setValues([vals]);
+    var f = sheet_('FINDINGS', F_HEAD), fl = f.getLastRow();
+    if (fl > 1) {
+      var fids = f.getRange(2, 2, fl - 1, 1).getValues();
+      for (var k = fids.length - 1; k >= 0; k--) if (String(fids[k][0]) === session) f.deleteRow(k + 2);
+    }
+    if (rows.length) {
+      var fr = f.getLastRow() + 1;
+      f.getRange(fr, 1, rows.length, F_HEAD.length).setNumberFormat('@').setValues(rows);
+    }
+    try { generateRows_(); } catch (e1) {}
+    try { applyPending_(job.tid); } catch (e2) {}
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+  // a copy of the recording next to the photos of the treatment (the original stays where AppSheet keeps it)
+  try {
+    var dest = treatFolder_(clinicFolders_().patients, job.pid, job.num, job.date), nm = file.getName();
+    if (!dest.getFilesByName(nm).hasNext()) file.makeCopy(nm, dest);
+  } catch (e3) {}
+  recState_(job.tid, 'בוצע ✓ ' + rows.length + ' ממצאים' + (check.length ? ' · לבדוק: ' + check.length : ''));
+}
+
+// run once from the editor
+function installRecordings() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'processRecordings' && !PropertiesService.getScriptProperties().getProperty('REC_KICK')) { ScriptApp.deleteTrigger(t); } });
+  ScriptApp.newTrigger('processRecordings').timeBased().everyMinutes(5).create();
+  ensureTreatmentCols_();
+}
+
+// small check of the key and the model (a few tokens): returns the model's answer
+function testGemini() {
+  return gemCall_([{ text: 'Reply with the single word: OK' }]);
 }
