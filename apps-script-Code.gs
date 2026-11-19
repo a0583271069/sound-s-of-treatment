@@ -1189,5 +1189,7 @@ function installRecordings() {
 
 // small check of the key and the model (a few tokens): returns the model's answer
 function testGemini() {
-  return gemCall_([{ text: 'Reply with the single word: OK' }]);
+  var r = gemCall_([{ text: 'Reply with the single word: OK' }]);
+  Logger.log('GEMINI: ' + r);
+  return r;
 }
