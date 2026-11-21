@@ -132,13 +132,15 @@ function doGet() { return out_({ ok: true, service: 'clinic-dictation' }); }
 function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(20000);
     var d = JSON.parse(e.postData.contents);
     var pw = PropertiesService.getScriptProperties().getProperty('PASSWORD');
     if (!pw || String(d.pw) !== pw) return out_({ ok: false, error: 'סיסמה שגויה' });
+    // read-only requests (the lists, the previous treatment, the photos) never wait for the lock: the 1-minute tick and
+    // the recording run hold it for several seconds, which made the photo comparison very slow
     if (d.action === 'list') return out_(listData_());
     if (d.action === 'prev') return out_(prevData_(String(d.treatment_id || '').trim()));
     if (d.action === 'photo') return out_(photo_(String(d.file || '')));
+    lock.waitLock(20000);
     var session = String(d.session || '');
     if (!session) return out_({ ok: false, error: 'חסר מזהה' });
 
