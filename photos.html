@@ -106,10 +106,15 @@ const photoWait = {};
 function prefetch(paths) {
   const todo = [...new Set(paths.filter((p) => p && !photoCache[p] && !photoWait[p]))];
   if (!todo.length) return;
-  const pr = call({ action: 'photos', files: todo }).then((j) => {
-    if (j && j.ok && Array.isArray(j.items)) todo.forEach((p, i) => { const it = j.items[i]; if (it && it.ok) photoCache[p] = 'data:' + it.mime + ';base64,' + it.data; });
-  }).catch(() => {}).then(() => { todo.forEach((p) => delete photoWait[p]); });
-  todo.forEach((p) => (photoWait[p] = pr));
+  // chunks of 3, one after the other: the first photos show up after a few seconds instead of all at the end
+  let chain = Promise.resolve();
+  for (let k = 0; k < todo.length; k += 3) {
+    const part = todo.slice(k, k + 3);
+    const pr = (chain = chain.then(() => call({ action: 'photos', files: part })).then((j) => {
+      if (j && j.ok && Array.isArray(j.items)) part.forEach((p, i) => { const it = j.items[i]; if (it && it.ok) photoCache[p] = 'data:' + it.mime + ';base64,' + it.data; });
+    }).catch(() => {}).then(() => { part.forEach((p) => delete photoWait[p]); }));
+    part.forEach((p) => (photoWait[p] = pr));
+  }
 }
 async function getPhoto(path) {
   if (!path) return null;
