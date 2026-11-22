@@ -138,6 +138,7 @@ async function load() {
     const qt = q.get('t');
     if (qt && tOf(qt)) { $('pat').value = tOf(qt).PATIENT_ID; fillTreatments(); $('tB').value = qt; $('pT').value = qt; drawCmp(); }
     status('');
+    setTimeout(() => ensureModel().catch(() => {}), 1500);
   } catch (e) { status('אין חיבור לסקריפט', true); }
 }
 const cmpCells = [];
@@ -197,6 +198,13 @@ function paintCell0(c) {
   if (c.cv.width !== c.im.naturalWidth || c.cv.height !== c.im.naturalHeight) { c.cv.width = c.im.naturalWidth; c.cv.height = c.im.naturalHeight; }
   paint(c.cv, c.im, cmpLines ? c.lm : null, c.view, false);
 }
+// pose detection on a copy of at most 1024 px (the landmarks are relative, so the result is the same frame)
+function small(im) {
+  const k = Math.min(1, 1024 / Math.max(im.naturalWidth, im.naturalHeight));
+  if (k >= 1) return im;
+  const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+  c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c;
+}
 function repaintCmp() { cmpCells.forEach(paintCell); }
 async function cmpAnalyse() {
   cmpLines = !cmpLines; $('cmpLinesBtn').className = cmpLines ? 'on' : '';
@@ -204,9 +212,12 @@ async function cmpAnalyse() {
   $('cmpNote').textContent = 'מנתח…';
   try {
     const m = await ensureModel();
+    let n = 0;
     for (const c of cmpCells) {
+      $('cmpNote').textContent = 'מנתח ' + (++n) + '/' + cmpCells.length + '…';
+      await new Promise((r) => setTimeout(r, 0));
       if (!poseCache[c.path]) {
-        const res = m.detect(c.im);
+        const res = m.detect(small(c.im));
         poseCache[c.path] = res.landmarks && res.landmarks[0] ? fixEar(res.landmarks[0].map((q) => ({ x: q.x * c.cv.width, y: q.y * c.cv.height, v: q.visibility }))) : null;
       }
       c.lm = poseCache[c.path]; paintCell(c);
@@ -238,14 +249,17 @@ function buildOne(id) {
     box.appendChild(b);
   });
 }
-async function ensureModel() {
+let modelP = null;
+function ensureModel() { return modelP || (modelP = ensureModel0().catch((e) => { modelP = null; throw e; })); }
+async function ensureModel0() {
   if (landmarker) return landmarker;
   $('pnote').textContent = 'טוען מודל זיהוי (פעם ראשונה, כמה שניות)…';
   const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-  landmarker = await PoseLandmarker.createFromOptions(fs, {
-    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task' },
+  const mk = (delegate) => PoseLandmarker.createFromOptions(fs, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task', delegate },
     runningMode: 'IMAGE', numPoses: 1,
   });
+  try { landmarker = await mk('GPU'); } catch (e) { landmarker = await mk('CPU'); }
   return landmarker;
 }
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
