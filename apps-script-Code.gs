@@ -140,6 +140,8 @@ function doPost(e) {
     if (d.action === 'list') return out_(listData_());
     if (d.action === 'prev') return out_(prevData_(String(d.treatment_id || '').trim()));
     if (d.action === 'photo') return out_(photo_(String(d.file || '')));
+    // several photos in ONE call (one script start-up instead of eight parallel ones, which queue up on the server)
+    if (d.action === 'photos') return out_({ ok: true, items: (d.files || []).slice(0, 12).map(function (f) { try { return photo_(String(f || '')); } catch (e) { return { ok: false, error: String(e) }; } }) });
     lock.waitLock(20000);
     var session = String(d.session || '');
     if (!session) return out_({ ok: false, error: 'חסר מזהה' });

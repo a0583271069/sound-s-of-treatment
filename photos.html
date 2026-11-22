@@ -101,8 +101,19 @@ async function call(body) {
   const r = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ pw: cfg.pw }, body)) });
   return r.json();
 }
+const photoWait = {};
+// fetch several photos with a single call; getPhoto() then answers from the cache
+function prefetch(paths) {
+  const todo = [...new Set(paths.filter((p) => p && !photoCache[p] && !photoWait[p]))];
+  if (!todo.length) return;
+  const pr = call({ action: 'photos', files: todo }).then((j) => {
+    if (j && j.ok && Array.isArray(j.items)) todo.forEach((p, i) => { const it = j.items[i]; if (it && it.ok) photoCache[p] = 'data:' + it.mime + ';base64,' + it.data; });
+  }).catch(() => {}).then(() => { todo.forEach((p) => delete photoWait[p]); });
+  todo.forEach((p) => (photoWait[p] = pr));
+}
 async function getPhoto(path) {
   if (!path) return null;
+  if (photoWait[path]) await photoWait[path];
   if (photoCache[path]) return photoCache[path];
   const j = await call({ action: 'photo', file: path });
   if (!j || !j.ok) return null;
@@ -150,6 +161,7 @@ async function drawCmp() {
   const A = tOf($('tA').value), B = tOf($('tB').value);
   $('capA').textContent = A ? 'א׳ (ימין בכל זוג): ' + capOf(A.Treatment_ID, $('sA').value) : '';
   $('capB').textContent = B ? 'ב׳ (שמאל בכל זוג): ' + capOf(B.Treatment_ID, $('sB').value) : '';
+  prefetch(VIEWS.flatMap((v) => [A && A[$('sA').value + '_' + v], B && B[$('sB').value + '_' + v]]));
   for (const v of VIEWS) {
     const lab = document.createElement('div'); lab.className = 'cap'; lab.textContent = VHE[v]; box.appendChild(lab);
     const row = document.createElement('div'); row.className = 'pair'; box.appendChild(row);
