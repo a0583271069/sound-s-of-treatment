@@ -67,12 +67,31 @@ function listData_() {
   return { ok: true, treatments: res, names: names };
 }
 
+// finds a photo quickly: the file id is remembered (CacheService), otherwise walk the known folder path
+// (small folders) and only then fall back to the slow search of the whole Drive by name
+function photoFile_(file) {
+  var cache = CacheService.getScriptCache(), key = 'pf_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, file)).slice(0, 22);
+  var id = cache.get(key);
+  if (id) { try { return DriveApp.getFileById(id); } catch (e) {} }
+  var parts = file.split('/').filter(String), base = parts[parts.length - 1], f = null;
+  if (parts.length > 1) {
+    var tops = DriveApp.getFoldersByName(parts[0]);
+    while (!f && tops.hasNext()) {
+      var cur = tops.next(), ok = true;
+      for (var i = 1; i < parts.length - 1 && ok; i++) { var it = cur.getFoldersByName(parts[i]); if (it.hasNext()) cur = it.next(); else ok = false; }
+      if (ok) { var fi = cur.getFilesByName(base); if (fi.hasNext()) f = fi.next(); }
+    }
+  }
+  if (!f) { var all = DriveApp.getFilesByName(base); if (all.hasNext()) f = all.next(); }
+  if (f) cache.put(key, f.getId(), 21600);
+  return f;
+}
 function photo_(file) {
   var base = file.split('/').pop();
   if (!base) return { ok: false, error: 'no file' };
-  var it = DriveApp.getFilesByName(base);
-  if (!it.hasNext()) return { ok: false, error: 'not found' };
-  var b = it.next().getBlob();
+  var f = photoFile_(file);
+  if (!f) return { ok: false, error: 'not found' };
+  var b = f.getBlob();
   return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
 }
 
