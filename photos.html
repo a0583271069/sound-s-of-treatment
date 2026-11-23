@@ -161,7 +161,9 @@ const cmpCells = [];
 let cmpLines = false;
 const poseCache = {}, imgCache = {};
 function capOf(tid, set) { const t = tOf(tid); return t ? 'טיפול ' + t.TREATMENT_NUMBER + ' · ' + (set === 'PHOTO' ? 'לפני' : 'אחרי') + (t.DATE ? ' · ' + t.DATE : '') : ''; }
+let drawGen = 0;
 async function drawCmp() {
+  const gen = ++drawGen;
   const box = $('pairs'); box.textContent = ''; cmpCells.length = 0;
   const A = tOf($('tA').value), B = tOf($('tB').value);
   $('capA').textContent = A ? 'א׳ (ימין בכל זוג): ' + capOf(A.Treatment_ID, $('sA').value) : '';
@@ -174,8 +176,10 @@ async function drawCmp() {
       const c = document.createElement('div'); c.className = 'cell'; c.textContent = '…'; row.appendChild(c);
       const path = t ? t[set + '_' + v] : '';
       getPhoto(path).then(async (src) => {
+        if (gen !== drawGen) return; // an older drawing that finished late: its cells are no longer on the page
         if (!src) { c.textContent = 'אין תמונה'; return; }
         const im = imgCache[path] || (imgCache[path] = await loadImg(src));
+        if (gen !== drawGen) return;
         const cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
         c.textContent = ''; c.appendChild(cv);
         const cell = { cv, im, view: v, path, lm: poseCache[path] || null };
