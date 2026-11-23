@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 22/11/2026 22:20</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 23/11/2026 15:10</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -169,13 +169,14 @@ async function drawCmp() {
   $('capA').textContent = A ? 'א׳ (ימין בכל זוג): ' + capOf(A.Treatment_ID, $('sA').value) : '';
   $('capB').textContent = B ? 'ב׳ (שמאל בכל זוג): ' + capOf(B.Treatment_ID, $('sB').value) : '';
   prefetch(VIEWS.flatMap((v) => [A && A[$('sA').value + '_' + v], B && B[$('sB').value + '_' + v]]));
+  const jobs = [];
   for (const v of VIEWS) {
     const lab = document.createElement('div'); lab.className = 'cap'; lab.textContent = VHE[v]; box.appendChild(lab);
     const row = document.createElement('div'); row.className = 'pair'; box.appendChild(row);
     [[A, $('sA').value], [B, $('sB').value]].forEach(([t, set]) => {
       const c = document.createElement('div'); c.className = 'cell'; c.textContent = '…'; row.appendChild(c);
       const path = t ? t[set + '_' + v] : '';
-      getPhoto(path).then(async (src) => {
+      jobs.push(getPhoto(path).then(async (src) => {
         if (gen !== drawGen) return; // an older drawing that finished late: its cells are no longer on the page
         if (!src) { c.textContent = 'אין תמונה'; return; }
         const im = imgCache[path] || (imgCache[path] = await loadImg(src));
@@ -184,9 +185,11 @@ async function drawCmp() {
         c.textContent = ''; c.appendChild(cv);
         const cell = { cv, im, view: v, path, lm: poseCache[path] || null };
         cmpCells.push(cell); paintCell(cell);
-      });
+      }));
     });
   }
+  // the lines / alignment buttons may already be on (from the previous treatment): analyse the new photos too
+  Promise.all(jobs).then(() => { if (gen === drawGen && cmpLines) cmpDetect(gen); });
 }
 let cmpNorm = false;
 const FW = 900, FH = 1200;
@@ -230,16 +233,21 @@ function repaintCmp() { cmpCells.forEach(paintCell); }
 async function cmpAnalyse() {
   cmpLines = !cmpLines; $('cmpLinesBtn').className = cmpLines ? 'on' : '';
   if (!cmpLines) { cmpNorm = false; $('cmpNormBtn').className = ''; repaintCmp(); $('cmpNote').textContent = ''; return; }
+  await cmpDetect(drawGen);
+}
+async function cmpDetect(gen) {
   $('cmpNote').textContent = 'מנתח…';
   try {
     const m = await ensureModel();
+    const cells = cmpCells.slice();
     let n = 0;
-    for (const c of cmpCells) {
-      $('cmpNote').textContent = 'מנתח ' + (++n) + '/' + cmpCells.length + '…';
+    for (const c of cells) {
+      if (gen !== drawGen) return;
+      $('cmpNote').textContent = 'מנתח ' + (++n) + '/' + cells.length + '…';
       await new Promise((r) => setTimeout(r, 0));
       if (!poseCache[c.path]) {
         const res = m.detect(small(c.im));
-        poseCache[c.path] = res.landmarks && res.landmarks[0] ? fixEar(res.landmarks[0].map((q) => ({ x: q.x * c.cv.width, y: q.y * c.cv.height, v: q.visibility }))) : null;
+        poseCache[c.path] = res.landmarks && res.landmarks[0] ? fixEar(res.landmarks[0].map((q) => ({ x: q.x * c.im.naturalWidth, y: q.y * c.im.naturalHeight, v: q.visibility }))) : null;
       }
       c.lm = poseCache[c.path]; paintCell(c);
     }
