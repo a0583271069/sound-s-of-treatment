@@ -920,6 +920,7 @@ function migrateMuscleIds() {
 // The API key lives only in Script properties (GEMINI_KEY). REC_STATE shows the progress in the app.
 // =====================================================================================================================
 var GEM_MODEL = 'gemini-4-carbon';
+var GEM_THINK = 'medium'; // thinking level of every Gemini call ('low' was used before; 'medium' tested to lose fewer findings)
 var REC_PIECE = 6 * 1024 * 1024;     // bytes sent to Gemini per call (inline, base64 = +33%)
 var REC_PIECE_AAC = 2.5 * 1024 * 1024; // raw AAC (ADTS) pieces: about 10 minutes at 32 kbps; a long single call drops the end of the recording
 var REC_MAX_INLINE = 14 * 1024 * 1024; // a file that cannot be cut (e.g. m4a) must fit in one call
@@ -936,7 +937,7 @@ function gemKey_() {
 
 // one generateContent call; returns the text. Throws an Error with .transient = true for 429 / 5xx / timeouts
 function gemCall_(parts, schema) {
-  var body = { contents: [{ role: 'user', parts: parts }], generationConfig: { thinkingConfig: { thinkingLevel: 'low' } } };
+  var body = { contents: [{ role: 'user', parts: parts }], generationConfig: { thinkingConfig: { thinkingLevel: GEM_THINK } } };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
   var r;
   try {
