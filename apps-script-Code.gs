@@ -921,7 +921,8 @@ function migrateMuscleIds() {
 // =====================================================================================================================
 var GEM_MODEL = 'gemini-4-carbon';
 var REC_PIECE = 6 * 1024 * 1024;     // bytes sent to Gemini per call (inline, base64 = +33%)
-var REC_MAX_INLINE = 14 * 1024 * 1024; // a non-MP3 file (cannot be cut) must fit in one call
+var REC_PIECE_AAC = 2.5 * 1024 * 1024; // raw AAC (ADTS) pieces: about 10 minutes at 32 kbps; a long single call drops the end of the recording
+var REC_MAX_INLINE = 14 * 1024 * 1024; // a file that cannot be cut (e.g. m4a) must fit in one call
 var REC_BUDGET_MS = 240000;          // stop starting new pieces after this much run time (limit is 6 min)
 var REC_WORK = 'REC_WORK', REC_WORK_HEAD = ['treatment_id', 'idx', 'text', 'updated_at'];
 var REC_ROOTS = ['C5', 'C6', 'C7', 'C8', 'T1', 'L2', 'L3', 'L4', 'L5', 'S1', 'S2'];
@@ -1135,12 +1136,13 @@ function recJob_(job, t0) {
   var file = recFile_(job.rec);
   if (!file) { recState_(job.tid, 'ממתין לקובץ'); return false; }
   var size = file.getSize(), isMp3 = /mp3|mpeg/i.test(file.getMimeType()) || /\.mp3$/i.test(file.getName());
+  var isAac = !isMp3 && /\.aac$/i.test(file.getName()), piece = isAac ? REC_PIECE_AAC : REC_PIECE;
   var st = JSON.parse(p.getProperty(skey) || 'null');
   if (!st || st.id !== file.getId() || st.size !== size) {
     var pieces;
-    if (isMp3) pieces = Math.max(1, Math.ceil(size / REC_PIECE));
+    if (isMp3 || isAac) pieces = Math.max(1, Math.ceil(size / piece));
     else { if (size > REC_MAX_INLINE) throw new Error('קובץ גדול מדי בפורמט שאי אפשר לחתוך (' + Math.round(size / 1048576) + ' MB). הקלט כ-MP3.'); pieces = 1; }
-    st = { id: file.getId(), size: size, n: pieces, mime: isMp3 ? 'audio/mpeg' : file.getMimeType() };
+    st = { id: file.getId(), size: size, n: pieces, mime: isMp3 ? 'audio/mpeg' : isAac ? 'audio/aac' : file.getMimeType() };
     p.setProperty(skey, JSON.stringify(st));
     recClearWork_(job.tid);
   }
@@ -1149,7 +1151,7 @@ function recJob_(job, t0) {
     if (texts[i] !== undefined) continue;
     if (Date.now() - t0 > REC_BUDGET_MS) { recState_(job.tid, 'מתמלל ' + i + '/' + st.n); return true; }
     recState_(job.tid, 'מתמלל ' + (i + 1) + '/' + st.n);
-    var a = i * REC_PIECE, b = Math.min(size, (i + 1) * REC_PIECE) - 1;
+    var a = i * piece, b = Math.min(size, (i + 1) * piece) - 1;
     if (st.n === 1) { a = 0; b = size - 1; }
     var bytes = recBytes_(st.id, a, b);
     var txt = gemCall_([{ text: REC_PROMPT_T }, { inlineData: { mimeType: st.mime, data: Utilities.base64Encode(bytes) } }]);
