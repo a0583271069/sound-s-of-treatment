@@ -40,7 +40,7 @@ select, input { background:var(--surface); border:1px solid var(--line); border-
 </head>
 <body>
 <main>
-  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 23/11/2026 15:10</small></h1>
+  <h1>תמונות והשוואה <small style="font-weight:400;color:var(--muted);font-size:12px">גרסה 24/11/2026 16:00</small></h1>
   <p class="note">התמונות נטענות מהדרייב שלך דרך הסקריפט, ומוצגות רק בדפדפן הזה. הניתוח רץ על המכשיר, שום תמונה לא נשלחת לשום שירות אחר.</p>
   <div class="row" id="cfgRow" hidden>
     <input id="cfgUrl" placeholder="כתובת הסקריפט" size="40"><input id="cfgPw" type="password" placeholder="סיסמה"><button id="cfgSave" type="button">שמור</button>
@@ -256,10 +256,10 @@ async function cmpDetect(gen) {
 }
 // ---- posture analysis ----
 let landmarker = null, img = null, lm = null, manual = [], manualMode = false, editMode = false, dragI = -1;
-const EDIT = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+const EDIT = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
 const LINES = [
   ['axis', 'ציר גוף (זיגזג)', '#e53935'], ['plumb', 'אנך', '#1e88e5'],
-  ['eyes', 'עיניים', '#8e24aa'], ['shoulders', 'כתפיים', '#fb8c00'], ['elbows', 'מרפקים', '#43a047'],
+  ['eyes', 'עיניים', '#8e24aa'], ['shoulders', 'כתפיים', '#fb8c00'], ['elbows', 'קצות אצבעות', '#43a047'],
   ['hips', 'אגן', '#00acc1'], ['knees', 'ברכיים', '#f4511e'], ['ankles', 'קרסוליים', '#6d4c41'],
 ];
 const on = {}; LINES.forEach((l) => (on[l[0]] = true));
@@ -356,7 +356,9 @@ function paint(cv, im, lm, view0, isMain) {
   const warn = [];
   if (lm) {
     const view = view0, side = view === 'LEFT' || view === 'RIGHT';
-    const L = (i) => lm[i];
+    const tip = (ids) => ids.map((i) => lm[i]).reduce((a, b) => (!a || b.y > a.y ? b : a), null); // lowest fingertip of a hand
+    const tipL = tip([17, 19, 21]), tipR = tip([18, 20, 22]);
+    const L = (i) => (i === 33 ? tipL : i === 34 ? tipR : lm[i]);
     const sh = mid(L(11), L(12)), hp = mid(L(23), L(24)), kn = mid(L(25), L(26)), an = mid(L(27), L(28));
     const earM = mid(L(7), L(8)), eyeM = view === 'BACK' ? earM : mid(L(2), L(5));
     const up = { x: sh.x - hp.x, y: sh.y - hp.y }, ul = Math.hypot(up.x, up.y) || 1;
@@ -373,11 +375,11 @@ function paint(cv, im, lm, view0, isMain) {
       g.strokeStyle = col.axis; g.lineWidth = lw; g.beginPath(); pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); pts.forEach((q) => dot(q, col.axis));
     }
     if (on.plumb) { g.strokeStyle = col.plumb; g.lineWidth = lw; g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); g.setLineDash([]); }
-    const NAME = { eyes: 'עיניים', shoulders: 'כתפיים', elbows: 'מרפקים', hips: 'אגן', knees: 'ברכיים', ankles: 'קרסוליים' };
+    const NAME = { eyes: 'עיניים', shoulders: 'כתפיים', elbows: 'קצות אצבעות', hips: 'אגן', knees: 'ברכיים', ankles: 'קרסוליים' };
     const pair = (k, i, j) => { if (!on[k]) return null; if (!good(L(i), L(j))) { warn.push(NAME[k]); return null; } seg(L(i), L(j), k, true); const t0 = tilt(L(i), L(j)), p0 = L(i), q0 = L(j), sl = (q0.y - p0.y) / ((q0.x - p0.x) || 1e-6), xe = Math.min(W - 8, hp.x + 0.40 * hh); label(t0.toFixed(1) + '°', xe, p0.y + sl * (xe - p0.x), col[k], true); return t0.toFixed(1) + '°'; };
     const hh = Math.abs(floor.y - headTop.y) || 1;
     if (!side) {
-      const t = { eyes: view === 'BACK' ? null : pair('eyes', 2, 5), shoulders: pair('shoulders', 11, 12), elbows: pair('elbows', 13, 14), hips: pair('hips', 23, 24), knees: pair('knees', 25, 26), ankles: pair('ankles', 27, 28) };
+      const t = { eyes: view === 'BACK' ? null : pair('eyes', 2, 5), shoulders: pair('shoulders', 11, 12), elbows: pair('elbows', 33, 34), hips: pair('hips', 23, 24), knees: pair('knees', 25, 26), ankles: pair('ankles', 27, 28) };
       if (view === 'BACK' && on.eyes) warn.push('עיניים (לא נראות מאחור)');
       const txt = Object.keys(t).filter((k) => t[k]).map((k) => NAME[k] + ' ' + t[k]);
       if (txt.length) out.push('<b>הטיות מהאופקי</b> (מעלות; מינוס = הצד שמאלי בתמונה גבוה יותר): ' + txt.join(' · '));
