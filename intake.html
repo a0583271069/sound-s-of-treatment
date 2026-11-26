@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>שאלון רפואי</title>
+<style>
+  :root { --c:#2f5d8a; --bg:#f3f6fa; --line:#c9d3df; --err:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); font-family: Arial, "Segoe UI", sans-serif; color:#1d2733; font-size:18px; line-height:1.5; }
+  .wrap { max-width:760px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:14px; }
+  h1 { margin:0 0 8px; font-size:26px; color:var(--c); }
+  h2 { margin:0 0 4px; font-size:22px; color:var(--c); }
+  .intro p { margin:6px 0; }
+  .q { margin-bottom:18px; }
+  .q > label.t, .q > .t { display:block; font-weight:bold; margin-bottom:6px; }
+  .req { color:var(--err); }
+  input[type=text], input[type=email], input[type=tel], textarea, select {
+    width:100%; font-size:18px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-family:inherit;
+  }
+  textarea { min-height:90px; resize:vertical; }
+  .row3 { display:flex; gap:10px; }
+  .row3 select { flex:1; }
+  .opt { display:flex; align-items:flex-start; gap:10px; margin:8px 0; }
+  .opt input { width:24px; height:24px; margin-top:3px; flex:none; }
+  .warn { background:#fff7e6; border:1px solid #f0c36d; border-radius:8px; padding:10px 14px; }
+  .warn ul { margin:6px 0 0; padding-inline-start:22px; }
+  .warn li { margin:3px 0; }
+  .err { color:var(--err); font-size:15px; margin-top:4px; display:none; }
+  .bad input, .bad select, .bad textarea { border-color:var(--err); }
+  .bad .err { display:block; }
+  .nav { display:flex; justify-content:space-between; gap:12px; margin:8px 0 30px; }
+  button { font-size:19px; padding:12px 26px; border-radius:10px; border:0; background:var(--c); color:#fff; cursor:pointer; }
+  button.sec { background:#e3e9f0; color:#1d2733; }
+  button:disabled { opacity:.5; }
+  .steps { text-align:center; color:#5b6b7c; margin:6px 0 12px; font-size:15px; }
+  .done { text-align:center; padding:40px 10px; }
+  .done h1 { font-size:30px; }
+  .small { font-size:14px; color:#5b6b7c; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="form">
+  <div class="card intro">
+    <h1>שאלון רפואי</h1>
+    <p>טופס הצהרת בריאות לפני טיפול M.T.R.S.M. עיסוי שיקומי אצל אברהם פופוביץ</p>
+    <p>המידע שתמלא כאן הוא מידע רפואי רגיש. הוא ישמש רק להתאמת הטיפול שלך ולמעקב, יישמר בחשבון גוגל פרטי ומוגן, והגישה אליו רק לי. לא אעביר אותו לאחרים בלי הסכמתך, אלא אם החוק מחייב. במהלך הטיפול אני מקליט את השיחה כדי לתעד ממצאים. ההקלטה נשמרת בחשבון הגוגל המוגן של העסק ומעובדת לטקסט באמצעות שירות בינה מלאכותית של גוגל. סירוב לתמונות או להקלטה לא ישפיע על הטיפול עצמו, אלא רק על תיעודו. אתה רשאי לעיין במידע, לתקן אותו ולבטל את ההסכמה בכל עת בפנייה אליי אישית או בוואטסאפ.</p>
+  </div>
+  <div class="steps" id="steps"></div>
+  <div id="pages"></div>
+  <div class="nav">
+    <button type="button" id="next">המשך</button>
+    <button type="button" id="back" class="sec">חזרה</button>
+  </div>
+</div>
+
+<div id="done" class="card done" hidden>
+  <h1>תודה!</h1>
+  <p>השאלון נשלח בהצלחה.</p>
+</div>
+
+</div>
+
+<script>
+var FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSf6i7j-f3vljrSpZFp79LGNQgYaW8KUwNMbbP0vhTu7hmfveQ/formResponse';
+var DRY = /[?&]dry=1/.test(location.search); // dry=1: does not send, only shows what would be sent
+
+var CONTRA_HEAD = 'התוויות נגד לטיפול';
+var CONTRA_INTRO = 'לידיעתך, במצבים הרפואיים הבאים ייתכן שטיפול עיסוי או שיקום שרירים אסור לחלוטין או דורש אישור רפואי בכתב טרם תחילת הטיפול:';
+var CONTRA = [
+ 'מצב לאחר ניתוח טרי, תקופת החלמה מוקדמת או נוכחות צלקת ניתוחית טרייה שטרם החלימה במלואה.',
+ 'מחלות זיהומיות פעילות, חום גבוה או דלקת חריפה בגוף.',
+ 'פקקת ורידים עמוקה (DVT) או סכנה לקרישי דם / דליות חמורות עם דלקת.',
+ 'גידולים ממאירים פעילים (אלא אם כן יש אישור רפואי מפורש).',
+ 'שברים טריים שטרם התאחו, קרעים חמורים בשרירים או בגידים בשלב האקוטי.',
+ 'סוכרת בלתי מאוזנת, נוירופתיה סוכרתית או פגיעה משמעותית בתחושה בעור או בגפיים.',
+ 'מחלות עור מדבקות, פתוחות או פריחות חמורות באזור הטיפול.',
+ 'לחץ דם בלתי מאוזן או בעיות לב חמורות שלא טופלו.',
+ 'נטילת תרופות מדללות דם בכמויות גבוהות (בסיכון מוגבר לדימומים או שטפי דם תת-עוריים קשים).',
+ 'אוסטיאופורוזיס חמורה או גרורות בעצמות.',
+ 'בקע דיסק חריף עם חולשה, נימול מתקדם או הפרעה בשליטה על סוגרים (יש לפנות לרופא מיד).',
+ 'פגיעה חדשה עם נפיחות, חבורה גדולה או דימום מתחת לעור.',
+ 'הפרעת קרישה או נטייה לדימומים.',
+ 'הזרקת סטרואידים (קורטיזון) באזור הטיפול בשבועות האחרונים.',
+ 'התקף חריף של מחלה דלקתית או אוטואימונית (כגון דלקת פרקים שגרונתית).',
+ 'נפיחות או בצקת ברגליים עקב אי ספיקת לב, כליות או כבד.',
+ 'שבץ או התקף לב לאחרונה, או כאבים בחזה.',
+ 'טיפול כימותרפי או הקרנות כעת או לאחרונה.',
+ 'מפרצת (אנוריזמה) ידועה.',
+ 'נטילת תרופות הרגעה, שיכוך כאבים חזק או הרפיית שרירים, או שתיית אלכוהול לפני הטיפול (פוגעים בתחושה).'
+];
+
+function range(a, b, step) { var r = []; if (a <= b) for (var i = a; i <= b; i += 1) r.push(String(i)); else for (var j = a; j >= b; j -= 1) r.push(String(j)); return r; }
+
+// kind: text | num | email | long | select | radio | checks | date | note
+// id: Google Form entry id
+var PAGES = [
+ { title: 'פרטים אישיים', items: [
+  { kind: 'email', id: 'emailAddress', label: 'אימייל', req: 1 },
+  { kind: 'checks', id: 1682898628, label: 'מסכים לאיסוף ושמירת המידע לצורך הטיפול', req: 1, opts: ['מסכים לאיסוף ושמירת המידע לצורך הטיפול'] },
+  { kind: 'checks', id: 1019759198, label: 'הסכמות נוספות (לא חובה)', opts: ['מסכים לצילום תמונות לתיעוד', 'מסכים להקלטת קול בזמן הטיפול לצורך תיעוד ממצאים, כולל שמירת ההקלטה ועיבודה על ידי שירות בינה מלאכותית של גוגל'] },
+  { kind: 'contra' },
+  { kind: 'radio', id: 775892432, label: 'האם חל עליך אחד מהמצבים הרשומים לעיל?', req: 1, opts: ['כן', 'לא'] },
+  { kind: 'text', id: 1182680667, label: 'אם ענית "כן", נא לפרט איזה מצב ומתי' },
+  { kind: 'num', id: 646253708, label: 'ת.ז', req: 1, digits: [5, 9] },
+  { kind: 'text', id: 606305987, label: 'שם מלא', req: 1 },
+  { kind: 'num', id: 518653663, label: 'טלפון', req: 1, digits: [9, 10], tel: 1 },
+  { kind: 'date', id: 444016460, label: 'תאריך לידה', req: 1 },
+  { kind: 'text', id: 567111147, label: 'כתובת מגורים' },
+  { kind: 'select', id: 2056704012, label: 'מצב משפחתי', opts: ['רווק/ה', 'נשוי/אה', 'גרוש/ה', 'אלמן/ה'] },
+  { kind: 'select', id: 1573052490, label: 'גובה (ס"מ)', opts: range(120, 220) },
+  { kind: 'select', id: 758099444, label: 'משקל (ק"ג)', opts: range(30, 200) },
+  { kind: 'text', id: 1524518802, label: 'עיסוק' }
+ ]},
+ { title: 'היסטוריה רפואית ומערכות הגוף', items: [
+  { kind: 'long', id: 267714957, label: 'היסטוריה רפואית אישית (מחלות, אלרגיות, תרופות, ניתוחים, חבלות, השתלות, רסיסים – כולל צלקות ישנות בגוף)' },
+  { kind: 'long', id: 1517941006, label: 'היסטוריה רפואית במשפחה (מחלות כרוניות / גנטיות, הרגלים)' },
+  { kind: 'long', id: 1874262000, label: 'בעיות במערכת השלד והשרירים (מפרקים, עצמות, עמוד שדרה, שרירים)' },
+  { kind: 'long', id: 555090767, label: 'בעיות בלב וכלי הדם (לחץ דם, אנמיה, תפקוד לב, דליות/ורידים, דופק, כאבים בחזה)' },
+  { kind: 'long', id: 70515517, label: 'בעיות במערכת הנשימה (קשיי נשימה, דלקות, אסטמה, סינוסיטיס, שיעול, ליחה, גירויים)' },
+  { kind: 'long', id: 1331027525, label: 'בעיות במערכת העיכול (צרבות, שלשול, עצירות, בטן רגישה, אולקוס, בחילות, הקאות, טחורים)' },
+  { kind: 'long', id: 1503454641, label: 'בעיות במערכת השתן (תכיפות ודחיפות, דלקות, אבנים בכליות, בריחת שתן)' },
+  { kind: 'long', id: 1436447711, label: 'בעיות הורמונאליות (סכרת, תת/יתר פעילות, בריחת סידן, תפקוד מיני)' },
+  { kind: 'long', id: 388751419, label: 'עור ושיער (פריחות, אקזמה, קשקשים, גירוד, פצעונים, נשירת שיער)' },
+  { kind: 'long', id: 839710057, label: 'ראש וצוואר (סחרחורות, מיגרנות, עיניים, אוזניים, חניכיים, לסת, שיניים)' },
+  { kind: 'long', id: 1688395643, label: 'נוירו פיזיולוגיה (אפילפסיה, דיכאון, חרדות, מתח, אי שקט, טיקים)' },
+  { kind: 'long', id: 571218020, label: 'כללי (תיאבון, צימאון, שינה, חום/קור, הזעה, עייפות, תשישות, רעד, חולשה)' },
+  { kind: 'long', id: 805342809, label: 'הרגלים (תזונה, עישון, אלכוהול, פעילות גופנית, מצב רוח כללי, סדר יום)' }
+ ]},
+ { title: 'התלונה העיקרית וציפיות מהטיפול', items: [
+  { kind: 'long', id: 1920244556, label: 'תלונה עיקרית (מה מביא אותך לכאן היום?)' },
+  { kind: 'text', id: 1325606934, label: 'מיקום הבעיה' },
+  { kind: 'long', id: 861447863, label: "סוג תחושה (כאב חד, עמום, זרמים, תפיסות וכו')" },
+  { kind: 'text', id: 1984963822, label: 'ממתי קיימת הבעיה?' },
+  { kind: 'long', id: 1656545021, label: 'איך התחילה הבעיה? (טראומה פתאומית, הדרגתי וכו\')' },
+  { kind: 'text', id: 244893911, label: 'תדירות הופעת הבעיה' },
+  { kind: 'long', id: 740582203, label: 'מה מחמיר את הבעיה?' },
+  { kind: 'long', id: 2117576090, label: 'מה מקל על הבעיה?' },
+  { kind: 'long', id: 221861679, label: 'נתונים נוספים שקשורים לתלונה העיקרית' },
+  { kind: 'long', id: 1040627697, label: 'תלונות משניות' },
+  { kind: 'long', id: 976128868, label: 'טיפולים עד עכשיו והשפעתם (האם קיבלת טיפולים בבעיה שלשמה הגעת?)' },
+  { kind: 'long', id: 886322549, label: 'מה היית מצפה להשיג מהטיפול?' },
+  { kind: 'long', id: 70300722, label: 'כיצד את/ה מוכן/ה לתרום להצלחת הטיפול?' }
+ ]},
+ { title: 'הצהרת בריאות ואישור נכונות הפרטים', items: [
+  { kind: 'checks', id: 902609882, req: 1, label: 'אני מצהיר כי כל הפרטים שרשמתי בשאלון זה הינם נכונים, מדויקים ומלאים, ולא הסתרתי כל מידע רפואי, פציעה, מחלה או מגבלה. ידוע לי כי הטיפול מבוסס על המידע שמסרתי, וכי אי-מסירת מידע רפואי מלא או נכון הינה באחריותי הבלעדית. אני מתחייב לעדכן את המטפל בכל שינוי במצבי הבריאותי לפני תחילת כל טיפול עתידי.', opts: ['קראתי, הבנתי ואני מאשר/ת את הצהרת הבריאות והתנאים'] }
+ ]}
+];
+
+var cur = 0, sending = false;
+var pagesEl = document.getElementById('pages');
+
+function el(tag, attrs, html) {
+  var e = document.createElement(tag);
+  if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (html != null) e.textContent = html;
+  return e;
+}
+
+function buildItem(it, pi, ii) {
+  var q = el('div', { 'class': 'q', 'data-k': pi + '_' + ii });
+  var name = 'f_' + pi + '_' + ii;
+  if (it.kind === 'contra') {
+    var w = el('div', { 'class': 'warn' });
+    var b = el('b', null, CONTRA_HEAD); w.appendChild(b);
+    w.appendChild(el('div', null, CONTRA_INTRO));
+    var ul = el('ul'); CONTRA.forEach(function (t) { ul.appendChild(el('li', null, t)); });
+    w.appendChild(ul); q.appendChild(w); return q;
+  }
+  var lab = el('div', { 'class': 't' }, it.label);
+  if (it.req) { var s = el('span', { 'class': 'req' }, ' *'); lab.appendChild(s); }
+  q.appendChild(lab);
+  var inp;
+  if (it.kind === 'text') {
+    inp = el('input', { type: 'text', name: name, autocomplete: 'off' });
+  } else if (it.kind === 'email') {
+    inp = el('input', { type: 'email', name: name, inputmode: 'email', autocomplete: 'email', dir: 'ltr' });
+  } else if (it.kind === 'num') {
+    inp = el('input', { type: 'text', name: name, inputmode: 'numeric', pattern: '[0-9]*', autocomplete: 'off', dir: 'ltr', maxlength: '12' });
+    if (it.tel) inp.setAttribute('inputmode', 'tel');
+    inp.addEventListener('input', function () { inp.value = inp.value.replace(/[^0-9]/g, ''); });
+  } else if (it.kind === 'long') {
+    inp = el('textarea', { name: name });
+  } else if (it.kind === 'select') {
+    inp = el('select', { name: name });
+    inp.appendChild(el('option', { value: '' }, 'בחר'));
+    it.opts.forEach(function (o) { inp.appendChild(el('option', { value: o }, o)); });
+  } else if (it.kind === 'date') {
+    var row = el('div', { 'class': 'row3' });
+    var d = el('select', { name: name + '_d' }), m = el('select', { name: name + '_m' }), y = el('select', { name: name + '_y' });
+    d.appendChild(el('option', { value: '' }, 'יום')); range(1, 31).forEach(function (v) { d.appendChild(el('option', { value: v }, v)); });
+    m.appendChild(el('option', { value: '' }, 'חודש')); range(1, 12).forEach(function (v) { m.appendChild(el('option', { value: v }, v)); });
+    y.appendChild(el('option', { value: '' }, 'שנה')); range(2026, 1920).forEach(function (v) { y.appendChild(el('option', { value: v }, v)); });
+    row.appendChild(d); row.appendChild(m); row.appendChild(y);
+    q.appendChild(row);
+  } else if (it.kind === 'radio' || it.kind === 'checks') {
+    it.opts.forEach(function (o, k) {
+      var l = el('label', { 'class': 'opt' });
+      var c = el('input', { type: it.kind === 'radio' ? 'radio' : 'checkbox', name: name, value: o });
+      l.appendChild(c); l.appendChild(el('span', null, o)); q.appendChild(l);
+    });
+  }
+  if (inp) q.appendChild(inp);
+  q.appendChild(el('div', { 'class': 'err' }, 'נא למלא שדה זה'));
+  return q;
+}
+
+PAGES.forEach(function (p, pi) {
+  var sec = el('div', { 'class': 'card', 'data-p': pi, hidden: '' });
+  sec.appendChild(el('h2', null, p.title));
+  sec.appendChild(el('div', { style: 'height:12px' }));
+  p.items.forEach(function (it, ii) { sec.appendChild(buildItem(it, pi, ii)); });
+  pagesEl.appendChild(sec);
+});
+
+function show(n) {
+  cur = n;
+  [].forEach.call(pagesEl.children, function (s, i) { s.hidden = (i !== n); });
+  document.getElementById('back').hidden = (n === 0);
+  document.getElementById('next').textContent = (n === PAGES.length - 1) ? 'שליחה' : 'המשך';
+  document.getElementById('steps').textContent = 'שלב ' + (n + 1) + ' מתוך ' + PAGES.length;
+  window.scrollTo(0, 0);
+}
+
+function val(pi, ii) {
+  var it = PAGES[pi].items[ii], name = 'f_' + pi + '_' + ii, f = pagesEl;
+  var g = function (n) { return f.querySelectorAll('[name="' + n + '"]'); };
+  if (it.kind === 'date') return { d: g(name + '_d')[0].value, m: g(name + '_m')[0].value, y: g(name + '_y')[0].value };
+  if (it.kind === 'radio' || it.kind === 'checks') {
+    var r = []; [].forEach.call(g(name), function (c) { if (c.checked) r.push(c.value); }); return r;
+  }
+  return g(name)[0].value.trim();
+}
+
+function validatePage(pi) {
+  var ok = true, first = null;
+  PAGES[pi].items.forEach(function (it, ii) {
+    if (it.kind === 'contra') return;
+    var q = pagesEl.querySelector('[data-k="' + pi + '_' + ii + '"]'), v = val(pi, ii), bad = false;
+    if (it.req) {
+      if (it.kind === 'date') bad = !(v.d && v.m && v.y);
+      else if (Array.isArray(v)) bad = v.length === 0;
+      else bad = !v;
+    }
+    if (!bad && it.kind === 'email' && v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) bad = true;
+    if (!bad && it.kind === 'num' && v && it.digits && (v.length < it.digits[0] || v.length > it.digits[1])) bad = true;
+    if (!bad && it.kind === 'date' && v.d && v.m && v.y) {
+      var dt = new Date(+v.y, +v.m - 1, +v.d);
+      if (dt.getMonth() !== +v.m - 1) bad = true; // e.g. 31/02
+    }
+    q.classList.toggle('bad', bad);
+    if (bad) { ok = false; if (!first) first = q; }
+  });
+  if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return ok;
+}
+
+function collect() {
+  var p = new URLSearchParams();
+  PAGES.forEach(function (pg, pi) {
+    pg.items.forEach(function (it, ii) {
+      if (it.kind === 'contra') return;
+      var v = val(pi, ii);
+      if (it.id === 'emailAddress') { p.append('emailAddress', v); return; }
+      var key = 'entry.' + it.id;
+      if (it.kind === 'date') {
+        p.append(key + '_year', v.y); p.append(key + '_month', v.m); p.append(key + '_day', v.d);
+      } else if (Array.isArray(v)) {
+        v.forEach(function (x) { p.append(key, x); });
+      } else if (v !== '') {
+        p.append(key, v);
+      }
+    });
+  });
+  p.append('fvv', '1');
+  p.append('pageHistory', '0,1,2,3');
+  return p;
+}
+
+function send() {
+  var body = collect();
+  if (DRY) { alert('dry run:\n' + body.toString().replace(/&/g, '\n')); return Promise.resolve(); }
+  return fetch(FORM_URL, { method: 'POST', mode: 'no-cors', body: body });
+}
+
+document.getElementById('back').addEventListener('click', function () { if (cur > 0) show(cur - 1); });
+document.getElementById('next').addEventListener('click', function () {
+  if (sending) return;
+  if (!validatePage(cur)) return;
+  if (cur < PAGES.length - 1) { show(cur + 1); return; }
+  sending = true;
+  var b = document.getElementById('next'); b.disabled = true; b.textContent = 'שולח…';
+  send().then(function () {
+    document.getElementById('form').hidden = true;
+    document.getElementById('done').hidden = false;
+    window.scrollTo(0, 0);
+  }).catch(function () {
+    sending = false; b.disabled = false; b.textContent = 'שליחה';
+    alert('השליחה נכשלה. בדוק חיבור לאינטרנט ונסה שוב. המידע שמילאת נשמר בדף.');
+  });
+});
+
+show(0);
+</script>
+</body>
+</html>
