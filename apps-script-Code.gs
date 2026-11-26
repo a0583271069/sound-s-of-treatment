@@ -96,7 +96,7 @@ function photo_(file) {
 }
 
 // ---- complaint / change + pain scale: two extra columns at the end of TREATMENTS (added automatically) --------------
-var T_EXTRA = ['COMPLAINT_CHANGE', 'PAIN_BEFORE', 'RECORDING', 'REC_STATE'];
+var T_EXTRA = ['COMPLAINT_CHANGE', 'PAIN_BEFORE', 'RECORDING', 'REC_STATE', 'REC_CHECK'];
 function ensureTreatmentCols_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
   if (!sh) return;
@@ -969,6 +969,18 @@ function recState_(tid, text) {
   } catch (e) {}
 }
 
+// the list of things the recording analysis could not note (REC_CHECK cell of the treatment; empty = nothing to check)
+function recCheck_(tid, text) {
+  try {
+    ensureTreatmentCols_();
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TREATMENTS');
+    var h = headIdx_(sh), ti = h['Treatment_ID'] - 1, ci = h['REC_CHECK'] - 1;
+    if (!(ti >= 0) || !(ci >= 0)) return;
+    var ids = sh.getRange(2, ti + 1, Math.max(1, sh.getLastRow() - 1), 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === tid) { sh.getRange(i + 2, ci + 1).setNumberFormat('@').setValue(text); return; }
+  } catch (e) {}
+}
+
 function recWorkSheet_() { return sheet_(REC_WORK, REC_WORK_HEAD); }
 function recTexts_(tid) {
   var sh = recWorkSheet_(), n = sh.getLastRow(), out = {};
@@ -1220,6 +1232,7 @@ function recFinish_(job, transcript, list, file) {
     var dest = treatFolder_(clinicFolders_().patients, job.pid, job.num, job.date), nm = file.getName();
     if (!dest.getFilesByName(nm).hasNext()) file.makeCopy(nm, dest);
   } catch (e3) {}
+  recCheck_(job.tid, check.join('\n').slice(0, 1500));
   recState_(job.tid, 'בוצע ✓ ' + rows.length + ' ממצאים' + (check.length ? ' · לבדוק: ' + check.length : ''));
 }
 
